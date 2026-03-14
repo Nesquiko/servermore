@@ -1,7 +1,23 @@
 [tools]
 air = "latest"
+"aqua:golang-migrate/migrate" = "latest"
 go = "1.26.0"
+sqlc = "latest"
 
 [tasks.dev-gateway]
 description = "Runs gateway setup for local development with hot reloading"
 run = 'air --build.cmd "go build -o ./tmp/gateway ./cmd/gateway" --build.entrypoint "./tmp/gateway"'
+
+[tasks.add-migration]
+description = "Adds new migration"
+usage = '''
+arg "<migration_name>" help="The name of the migration"
+'''
+run = 'migrate create -dir ./db/migrations -ext sql ${usage_migration_name}'
+
+[tasks.sqlc-generate]
+description = "Runs sqlc to generate Go code for queries"
+run = [
+	'sqlc compile',
+	'sqlc generate'
+]
