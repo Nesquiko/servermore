@@ -1,2 +1,2 @@
 /tmp
-/pkg/queries.gen
+**/*.gen*

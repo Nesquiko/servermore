@@ -1,0 +1,36 @@
+openapi: 3.0.4
+info:
+  title: Servermore common components
+  version: 0.0.1
+components:
+  schemas:
+    ErrorDetail:
+      type: object
+      description: Somewhat RFC 9457 compliant problem details.
+      properties:
+        title:
+          type: string
+          description: Short human-readable summary.
+        status:
+          type: integer
+          description: HTTP status code.
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence.
+        instance:
+          type: string
+          description: URI reference identifying this specific occurrence.
+          example: "/functions/123"
+        code:
+          type: string
+          description: Machine readable error code.
+      required: [title, status, detail, code, instance]
+      additionalProperties: true
+
+  responses:
+    ErrorDetailResponse:
+      description: Error response.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ErrorDetail'

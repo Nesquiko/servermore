@@ -1,0 +1,53 @@
+openapi: 3.0.4
+info:
+  title: Commander API
+  version: 0.0.1
+  description: Control plane API for managing uploaded functions.
+servers:
+  - url: http://localhost:8080
+
+paths:
+  /functions:
+    post:
+      operationId: createFunction
+      summary: Upload a function binary
+      description: Creates a function record and uploads the binary payload using multipart form data.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Human readable function name.
+                binary:
+                  type: string
+                  format: binary
+                  description: Function binary.
+              required: [name, binary]
+      responses:
+        '201':
+          description: Function uploaded successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateFunctionResponse'
+        '413':
+          $ref: './common.yaml#/components/responses/ErrorDetailResponse'
+        '500':
+          $ref: './common.yaml#/components/responses/ErrorDetailResponse'
+
+components:
+  schemas:
+    CreateFunctionResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: Unique function identifier.
+        name:
+          type: string
+          description: Human readable function name.
+      required: [id, name]

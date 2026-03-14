@@ -1,8 +1,9 @@
 [tools]
-air = "latest"
-"aqua:golang-migrate/migrate" = "latest"
 go = "1.26.0"
-sqlc = "latest"
+air = "1.64.5"
+"aqua:golang-migrate/migrate" = "4.19.1"
+sqlc = "v1.30.0"
+oapi-codegen = "v2.6.0"
 
 [tasks.dev-gateway]
 description = "Runs gateway setup for local development with hot reloading"
@@ -20,4 +21,12 @@ description = "Runs sqlc to generate Go code for queries"
 run = [
 	'sqlc compile',
 	'sqlc generate'
+]
+
+[tasks.commander-openapi]
+hide = true
+description = "Generates code from openapi specs in ./api/"
+run = [
+	'oapi-codegen --config ./pkg/api/commander-api-codegen.yaml ./api/commander-openapi.yaml',
+	'oapi-codegen --config ./pkg/api/common-api-codegen.yaml ./api/common.yaml'
 ]
