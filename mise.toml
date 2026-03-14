@@ -1,0 +1,7 @@
+[tools]
+air = "latest"
+go = "1.26.0"
+
+[tasks.dev-gateway]
+description = "Runs gateway setup for local development with hot reloading"
+run = 'air --build.cmd "go build -o ./tmp/gateway ./cmd/gateway" --build.entrypoint "./tmp/gateway"'
