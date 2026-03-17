@@ -5,6 +5,9 @@ air = "1.64.5"
 sqlc = "v1.30.0"
 oapi-codegen = "v2.6.0"
 
+[tasks.test]
+run = 'go test ./... -v'
+
 [tasks.dev-gateway]
 description = "Runs gateway setup for local development with hot reloading"
 run = 'air --build.cmd "go build -o ./tmp/gateway ./cmd/gateway" --build.entrypoint "./tmp/gateway"'

@@ -20,7 +20,6 @@ func Middleware(
 		withAPIErrorHolder,
 		CreateLogger(loggingOpts),
 		middleware.Recoverer,
-		middleware.Heartbeat(HeartbeatEndpoint),
 		otelchimetric.NewRequestDurationMillis(otelCfg),
 		otelchimetric.NewRequestInFlight(otelCfg),
 		otelchimetric.NewResponseSizeBytes(otelCfg),

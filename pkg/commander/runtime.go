@@ -15,6 +15,7 @@ import (
 	api "github.com/Nesquiko/servermore/pkg/api/commander"
 	"github.com/Nesquiko/servermore/pkg/server"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	otelchimetric "github.com/riandyrn/otelchi/metric"
 )
 
@@ -42,6 +43,7 @@ func Run(ctx context.Context, conf CommanderHTTPServerConfig) error {
 	}
 
 	r := chi.NewMux()
+	r.Use(middleware.Heartbeat(server.HeartbeatEndpoint))
 
 	handler := api.HandlerWithOptions(srv, api.ChiServerOptions{
 		BaseURL:          conf.BaseURL,
