@@ -41,13 +41,16 @@ paths:
 
 components:
   schemas:
-    CreateFunctionResponse:
+    Function:
       type: object
       properties:
         id:
           type: integer
+          format: int64
           description: Unique function identifier.
         name:
           type: string
           description: Human readable function name.
       required: [id, name]
+    CreateFunctionResponse:
+      $ref: '#/components/schemas/Function'

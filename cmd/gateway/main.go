@@ -16,11 +16,11 @@ const FunctionIdPathParam = "functionId"
 
 func main() {
 	ctx := context.Background()
-	opts := server.Opts{
-		ExportEnabled: false,
-		AppName:       "gateway",
-		AppVersion:    "0.0.1",
-		Env:           "LOCAL",
+	opts := server.MonitoringOpts{
+		IsDev:      false,
+		AppName:    "gateway",
+		AppVersion: "0.0.1",
+		Env:        "LOCAL",
 	}
 	otelCfg, shutdown, err := server.InitOTEL(ctx, opts)
 	if err != nil {

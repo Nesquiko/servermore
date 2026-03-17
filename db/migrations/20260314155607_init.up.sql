@@ -1,5 +1,6 @@
 create table functions (
     id integer primary key,
+	hash blob not null unique,
 	name text not null,
     path text not null,
 

@@ -5,10 +5,8 @@ generate:
   chi-server: true
   models: true
   embedded-spec: true
-  strict-server: true
 compatibility:
   apply-chi-middleware-first-to-last: true
 import-mapping:
-  # ./common.yaml: "-"
   ./common.yaml: "github.com/Nesquiko/servermore/pkg/api/common"
 

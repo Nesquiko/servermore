@@ -9,6 +9,10 @@ oapi-codegen = "v2.6.0"
 description = "Runs gateway setup for local development with hot reloading"
 run = 'air --build.cmd "go build -o ./tmp/gateway ./cmd/gateway" --build.entrypoint "./tmp/gateway"'
 
+[tasks.commander]
+description = "Runs commander setup for local development with hot reloading"
+run = 'air --build.cmd "go build -o ./tmp/commander ./cmd/commander" --build.entrypoint "./tmp/commander"'
+
 [tasks.add-migration]
 description = "Adds new migration"
 usage = '''

@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
 
+	"github.com/go-chi/httplog/v3"
 	otelchimetric "github.com/riandyrn/otelchi/metric"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
@@ -16,8 +20,8 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 )
 
-type Opts struct {
-	ExportEnabled bool
+type MonitoringOpts struct {
+	IsDev bool
 
 	AppName    string
 	AppVersion string
@@ -26,7 +30,7 @@ type Opts struct {
 
 func InitOTEL(
 	ctx context.Context,
-	opts Opts,
+	opts MonitoringOpts,
 ) (otelchimetric.BaseConfig, func(ctx context.Context) error, error) {
 	res, err := resource.New(
 		ctx,
@@ -38,7 +42,7 @@ func InitOTEL(
 	)
 	if err != nil {
 		return otelchimetric.BaseConfig{}, nil, fmt.Errorf(
-			"InitOTEL failed to initialize resource: %w",
+			"failed to initialize resource: %w",
 			err,
 		)
 	}
@@ -46,14 +50,14 @@ func InitOTEL(
 	tp, err := InitTracerProvider(ctx, res, opts)
 	if err != nil {
 		return otelchimetric.BaseConfig{}, nil, fmt.Errorf(
-			"InitOTEL failed to initialize tracer provider: %w",
+			"failed to initialize tracer provider: %w",
 			err,
 		)
 	}
 	mp, err := InitMeter(ctx, res, opts)
 	if err != nil {
 		return otelchimetric.BaseConfig{}, nil, fmt.Errorf(
-			"InitOTEL failed to initialize meter provider: %w",
+			"failed to initialize meter provider: %w",
 			err,
 		)
 	}
@@ -82,17 +86,17 @@ func InitOTEL(
 func InitTracerProvider(
 	ctx context.Context,
 	res *resource.Resource,
-	opts Opts,
+	opts MonitoringOpts,
 ) (*sdktrace.TracerProvider, error) {
 	tracerOpts := []sdktrace.TracerProviderOption{
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 		sdktrace.WithResource(res),
 	}
 
-	if opts.ExportEnabled {
+	if opts.IsDev {
 		exporter, err := otlptracegrpc.New(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("InitTracerProvider failed to initialize exporter: %w", err)
+			return nil, fmt.Errorf("failed to initialize exporter: %w", err)
 		}
 		tracerOpts = append(tracerOpts, sdktrace.WithBatcher(exporter))
 	}
@@ -103,16 +107,16 @@ func InitTracerProvider(
 func InitMeter(
 	ctx context.Context,
 	res *resource.Resource,
-	opts Opts,
+	opts MonitoringOpts,
 ) (*sdkmetric.MeterProvider, error) {
 	providerOpts := []sdkmetric.Option{
 		sdkmetric.WithResource(res),
 	}
 
-	if opts.ExportEnabled {
+	if opts.IsDev {
 		exporter, err := otlpmetricgrpc.New(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("InitMeter failed to initialize exporter: %w", err)
+			return nil, fmt.Errorf("failed to initialize exporter: %w", err)
 		}
 		providerOpts = append(
 			providerOpts,
@@ -121,4 +125,40 @@ func InitMeter(
 	}
 
 	return sdkmetric.NewMeterProvider(providerOpts...), nil
+}
+
+func CreateLogger(opts MonitoringOpts) func(http.Handler) http.Handler {
+	logSchema := httplog.SchemaOTEL
+	logFmt := logSchema.Concise(opts.IsDev)
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		ReplaceAttr: logFmt.ReplaceAttr,
+	})).With(
+		slog.String("app", opts.AppName),
+		slog.String("version", opts.AppVersion),
+		slog.String("env", opts.Env),
+	)
+
+	return httplog.RequestLogger(logger, &httplog.Options{
+		Level:             slog.LevelInfo,
+		Schema:            logSchema,
+		RecoverPanics:     true,
+		LogRequestHeaders: []string{"Origin"},
+		LogExtraAttrs: func(req *http.Request, _ string, _ int) []slog.Attr {
+			apiErr := GetAPIError(req.Context())
+			if apiErr == nil {
+				return nil
+			}
+
+			attrs := []slog.Attr{
+				slog.String("error.code", apiErr.Code),
+				slog.Int("error.status", apiErr.Status),
+				slog.String("error.instance", apiErr.Instance),
+				slog.String("error.title", apiErr.Title),
+				slog.String("error.detail", apiErr.Detail),
+			}
+
+			return attrs
+		},
+	})
 }
