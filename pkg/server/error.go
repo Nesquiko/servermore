@@ -75,6 +75,9 @@ func EncodeApiError(w http.ResponseWriter, r *http.Request, err *ApiError) {
 }
 
 const (
+	InvalidRequestCode  = "invalid.request"
+	InvalidRequestTitle = "Invalid request"
+
 	InvalidParamErrorCode   = "invalid.path.param"
 	InvalidParamErrorTitle  = "Invalid path param"
 	InvalidParamErrorDetail = "Invalid path param %q"

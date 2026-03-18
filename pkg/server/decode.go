@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const MaxBytes = 1_048_576 // 1MB
+const MaxBytes = 64 * 1024 * 1024 // 64MB
 
 func Decode[T any](w http.ResponseWriter, r *http.Request) (T, Error) {
 	dst, err := decode[T](w, r)
@@ -79,7 +79,7 @@ func decode[T any](w http.ResponseWriter, r *http.Request) (T, error) {
 			fieldName := strings.TrimPrefix(err.Error(), InvalidFieldPrefix)
 			return dst, &decodeErr{
 				err:  fmt.Errorf("body contains unknown key %s", fieldName),
-				code: "invalid.request",
+				code: InvalidRequestCode,
 			}
 
 		case err.Error() == LargeBodyErrorStr:

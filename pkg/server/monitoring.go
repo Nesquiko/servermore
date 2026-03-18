@@ -151,11 +151,12 @@ func CreateLogger(opts MonitoringOpts) func(http.Handler) http.Handler {
 			}
 
 			attrs := []slog.Attr{
-				slog.String("error.code", apiErr.Code),
-				slog.Int("error.status", apiErr.Status),
-				slog.String("error.instance", apiErr.Instance),
-				slog.String("error.title", apiErr.Title),
-				slog.String("error.detail", apiErr.Detail),
+				slog.String("error", apiErr.cause.Error()),
+				slog.String("api.error.code", apiErr.Code),
+				slog.Int("api.error.status", apiErr.Status),
+				slog.String("api.error.instance", apiErr.Instance),
+				slog.String("api.error.title", apiErr.Title),
+				slog.String("api.error.detail", apiErr.Detail),
 			}
 
 			return attrs

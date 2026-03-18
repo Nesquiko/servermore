@@ -47,7 +47,7 @@ func (svc *CommanderService) CreateFunction(
 		return api.Function{}, err
 	}
 
-	newFunc, err := svc.db.CreateFunction(ctx, funcPath, funcName)
+	newFunc, err := svc.db.CreateFunction(ctx, funcPath, funcName, hash)
 	if err != nil {
 		return api.Function{}, fmt.Errorf("persisting new function failed: %v", err)
 	}

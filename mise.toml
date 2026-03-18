@@ -9,9 +9,12 @@ protoc-gen-go = "1.36.11"
 protoc-gen-go-grpc = "1.6.1"
 
 [tasks.test]
+usage = '''
+flag "--count <count>" help="How many times to run tests" default="1"
+'''
 run = [
 	'go build -o ./tmp/testing-guest ./test/testing-guest',
-	'go test ./... -v'
+	'go test -v ${usage_count:+-count ${usage_count}} ./...'
 ]
 
 [tasks.dev-gateway]

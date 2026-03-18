@@ -3,14 +3,31 @@ package commander
 import (
 	"context"
 	"database/sql"
+	"embed"
+	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
+	"time"
 
 	"github.com/Nesquiko/servermore/pkg/queries.gen"
-	_ "modernc.org/sqlite"
+	"github.com/golang-migrate/migrate/v4"
+	sqlitemigrate "github.com/golang-migrate/migrate/v4/database/sqlite"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
+	sqlite "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
+//go:embed migrations/*.sql
+var migrations embed.FS
+
 type CommanderDB interface {
-	CreateFunction(ctx context.Context, path string, name string) (queries.Function, error)
+	CreateFunction(
+		ctx context.Context,
+		path string,
+		name string,
+		hash []byte,
+	) (queries.Function, error)
 	FunctionExistsByHash(ctx context.Context, hash []byte) (bool, error)
 }
 
@@ -25,10 +42,37 @@ func NewSQLiteDB(dbUri string) (*SQLiteCommanderDB, error) {
 	}
 
 	if err = db.Ping(); err != nil {
-		return nil, fmt.Errorf("ping failed: %w", err)
+		return nil, fmt.Errorf("ping failed: %v", err)
+	}
+
+	if err = migrateUp(db); err != nil {
+		return nil, fmt.Errorf("migrate db schema failed: %v", err)
 	}
 
 	return &SQLiteCommanderDB{queries: queries.New(db)}, nil
+}
+
+func migrateUp(db *sql.DB) error {
+	source, err := iofs.New(migrations, "migrations")
+	if err != nil {
+		return fmt.Errorf("failed to read migrations: %v", err)
+	}
+
+	driver, err := sqlitemigrate.WithInstance(db, &sqlitemigrate.Config{})
+	if err != nil {
+		return fmt.Errorf("failed to create sqlite migrate driver: %v", err)
+	}
+	m, err := migrate.NewWithInstance("iofs", source, "sqlite", driver)
+	if err != nil {
+		return fmt.Errorf("failed to initialize migrate: %v", err)
+	}
+	m.Log = slogLogger{verbose: true}
+
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		return fmt.Errorf("migrate up failed: %w", err)
+	}
+
+	return nil
 }
 
 var _ CommanderDB = (*SQLiteCommanderDB)(nil)
@@ -38,8 +82,14 @@ func (s *SQLiteCommanderDB) CreateFunction(
 	ctx context.Context,
 	path string,
 	name string,
+	hash []byte,
 ) (queries.Function, error) {
-	f, err := s.queries.CreateFunction(ctx, queries.CreateFunctionParams{Path: path, Name: name})
+	f, err := withRetry(ctx, func(ctx context.Context) (queries.Function, error) {
+		return s.queries.CreateFunction(
+			ctx,
+			queries.CreateFunctionParams{Path: path, Name: name, Hash: hash},
+		)
+	})
 	if err != nil {
 		return queries.Function{}, fmt.Errorf("failed to create function: %w", err)
 	}
@@ -49,10 +99,60 @@ func (s *SQLiteCommanderDB) CreateFunction(
 
 // FunctionExistsByHash implements [CommanderDB].
 func (s *SQLiteCommanderDB) FunctionExistsByHash(ctx context.Context, hash []byte) (bool, error) {
-	exists, err := s.queries.FunctionExistsByHash(ctx, hash)
+	exists, err := withRetry(ctx, func(ctx context.Context) (int64, error) {
+		return s.queries.FunctionExistsByHash(ctx, hash)
+	})
 	if err != nil {
 		return false, fmt.Errorf("failed to check if function exists: %w", err)
 	}
 
 	return exists == 1, nil
+}
+
+const MaxRetries = 10
+
+func withRetry[R any](ctx context.Context, f func(context.Context) (R, error)) (R, error) {
+	retries := 1
+	for {
+		result, err := f(ctx)
+		if nil == err {
+			return result, nil
+		}
+
+		var sqlErr *sqlite.Error
+		if !errors.As(err, &sqlErr) {
+			return result, err
+		}
+
+		code := sqlErr.Code()
+		if code != sqlite3.SQLITE_BUSY && code != sqlite3.SQLITE_LOCKED {
+			return result, err
+		}
+
+		if retries >= MaxRetries {
+			return result, fmt.Errorf("db function errored more than max times: %v", err)
+		}
+		retries++
+
+		select {
+		case <-ctx.Done():
+			return result, ctx.Err()
+		case <-time.After(time.Duration(retries) * 5 * time.Millisecond):
+		}
+	}
+}
+
+// simple wrapper around slog which adheres to migrate.Logger interface
+type slogLogger struct {
+	verbose bool
+}
+
+func (l slogLogger) Printf(format string, v ...any) {
+	format = strings.TrimRight(format, "\n")
+	msg := fmt.Sprintf(format, v...)
+	slog.Info(msg)
+}
+
+func (l slogLogger) Verbose() bool {
+	return l.verbose
 }

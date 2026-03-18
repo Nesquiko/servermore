@@ -1,5 +1,5 @@
 -- name: CreateFunction :one
-insert into functions (path, name) values (?, ?)
+insert into functions (path, name, hash) values (?, ?, ?)
 returning *;
 
 -- name: FunctionExistsByHash :one

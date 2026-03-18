@@ -30,14 +30,14 @@ type CommanderHTTPServer struct {
 var _ api.ServerInterface = (*CommanderHTTPServer)(nil)
 
 func NewCommanderServer(conf CommanderHTTPServerConfig) (*CommanderHTTPServer, error) {
-	db, err := NewSQLiteDB(conf.DbURI)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize db: %w", err)
-	}
-
 	funcStorage, err := NewFSFunctionStorage(conf.FuncStorageRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize function storage: %v", err)
+	}
+
+	db, err := NewSQLiteDB(conf.DbURI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize db: %w", err)
 	}
 	svc := NewCommanderService(db, funcStorage)
 
@@ -63,7 +63,13 @@ func (c *CommanderHTTPServer) CreateFunction(w http.ResponseWriter, r *http.Requ
 			})
 			return
 		}
-		server.InternalServerError(w, r, err)
+		server.EncodeError(w, r, server.Error{
+			Cause:  err,
+			Code:   server.InvalidRequestCode,
+			Detail: err.Error(),
+			Status: http.StatusBadRequest,
+			Title:  server.InvalidRequestTitle,
+		})
 		return
 	}
 

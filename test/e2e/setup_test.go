@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -31,6 +32,8 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	dbFilePath := filepath.Join(tmpDir, "test-commander.db")
+
 	config := commander.CommanderHTTPServerConfig{
 		AppName:         "test-commander",
 		CommitHash:      "test",
@@ -38,7 +41,7 @@ func TestMain(m *testing.M) {
 		Host:            "localhost",
 		Port:            port,
 		BaseURL:         "",
-		DbURI:           ":memory:",
+		DbURI:           "file:" + dbFilePath,
 		FuncStorageRoot: tmpDir,
 	}
 	ServerUrl = fmt.Sprintf("http://%s:%s", config.Host, config.Port)
@@ -70,6 +73,9 @@ func TestMain(m *testing.M) {
 	}
 
 	exitCode := m.Run()
+	if err := os.RemoveAll(tmpDir); err != nil {
+		slog.Error("failed to remove temp dir", "dir", tmpDir, "error", err)
+	}
 
 	os.Exit(exitCode)
 }
