@@ -4,9 +4,15 @@ air = "1.64.5"
 "aqua:golang-migrate/migrate" = "4.19.1"
 sqlc = "v1.30.0"
 oapi-codegen = "v2.6.0"
+protoc = "34.0"
+protoc-gen-go = "1.36.11"
+protoc-gen-go-grpc = "1.6.1"
 
 [tasks.test]
-run = 'go test ./... -v'
+run = [
+	'go build -o ./tmp/testing-guest ./test/testing-guest',
+	'go test ./... -v'
+]
 
 [tasks.dev-gateway]
 description = "Runs gateway setup for local development with hot reloading"
@@ -30,10 +36,15 @@ run = [
 	'sqlc generate'
 ]
 
-[tasks.commander-openapi]
-hide = true
+[tasks.commander-openapi-generate]
 description = "Generates code from openapi specs in ./api/"
 run = [
 	'oapi-codegen --config ./pkg/api/commander-api-codegen.yaml ./api/commander-openapi.yaml',
 	'oapi-codegen --config ./pkg/api/common-api-codegen.yaml ./api/common.yaml'
+]
+
+[tasks.grpc-generate]
+description = "Generates code from proto files"
+run = [
+	'protoc --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:. pkg/guest/guest.proto'
 ]

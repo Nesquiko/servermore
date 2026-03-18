@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package guest;
+option go_package = "github.com/Nesquiko/servermore/pkg/guest";
+
+message InvocationRequest {
+  string method = 1;
+  string path = 2;
+  map<string, string> headers = 3;
+  bytes body = 4;
+}
+
+message InvocationResponse {
+  uint32 status_code = 1;
+  map<string, string> headers = 2;
+  bytes body = 3;
+}
+
+message HeartbeatRequest {}
+message HeartbeatResponse {}
+
+service Guest {
+  rpc InvokeFunction(InvocationRequest) returns (InvocationResponse) {}
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse) {}
+}
