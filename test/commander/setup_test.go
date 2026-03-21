@@ -1,4 +1,4 @@
-package e2e
+package commander_test
 
 import (
 	"context"
