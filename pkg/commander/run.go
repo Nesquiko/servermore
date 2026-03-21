@@ -26,7 +26,7 @@ func Run(ctx context.Context, conf CommanderHTTPServerConfig) error {
 	srv, err := NewCommanderServer(conf)
 	if err != nil {
 		slog.Error("failed to initialize server", "error", err)
-		return fmt.Errorf("server initialization failed: %v", err)
+		return fmt.Errorf("server initialization failed: %w", err)
 	}
 
 	monitoringOpts := server.MonitoringOpts{
@@ -36,10 +36,10 @@ func Run(ctx context.Context, conf CommanderHTTPServerConfig) error {
 		Env:        conf.Env,
 	}
 
-	otelCfg, otelShutdown, err := server.InitOTEL(ctx, monitoringOpts)
+	otelCfg, otelShutdown, err := server.InitHttpOTEL(ctx, monitoringOpts)
 	if err != nil {
 		slog.Error("failed to initialize OTEL", "error", err)
-		return fmt.Errorf("OTEL initialization failed: %v", err)
+		return fmt.Errorf("OTEL initialization failed: %w", err)
 	}
 
 	r := chi.NewMux()
@@ -73,7 +73,7 @@ func Run(ctx context.Context, conf CommanderHTTPServerConfig) error {
 	case err := <-errCh:
 		if err != nil {
 			slog.Error("http server failed", "error", err)
-			return fmt.Errorf("http server failed: %v", err)
+			return fmt.Errorf("http server failed: %w", err)
 		}
 	}
 
@@ -90,7 +90,7 @@ func createMiddleware(
 	otelCfg otelchimetric.BaseConfig,
 	loggingOpts server.MonitoringOpts,
 ) []api.MiddlewareFunc {
-	ms := server.Middleware(otelCfg, loggingOpts)
+	ms := server.HttpMiddleware(otelCfg, loggingOpts)
 	out := make([]api.MiddlewareFunc, len(ms))
 	for i, m := range ms {
 		out[i] = api.MiddlewareFunc(m)

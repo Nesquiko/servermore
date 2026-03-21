@@ -1,0 +1,12 @@
+version: "2"
+sql:
+  - engine: "sqlite"
+    queries: "./testing-queries.sql"
+    schema: "../../pkg/commander/migrations"
+    gen:
+      go:
+        package: "testqueries"
+        out: "./queries.gen"
+        emit_empty_slices: true
+        emit_sql_as_comment: true
+        query_parameter_limit: 1

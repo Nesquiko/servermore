@@ -27,7 +27,7 @@ func (svc *CommanderService) CreateFunction(
 ) (api.Function, error) {
 	funcBytes, err := io.ReadAll(funcBytesReader)
 	if err != nil {
-		return api.Function{}, fmt.Errorf("reading function bytes failed: %v", err)
+		return api.Function{}, fmt.Errorf("reading function bytes failed: %w", err)
 	}
 	defer funcBytesReader.Close()
 
@@ -35,7 +35,7 @@ func (svc *CommanderService) CreateFunction(
 
 	exists, err := svc.db.FunctionExistsByHash(ctx, hash)
 	if err != nil {
-		return api.Function{}, fmt.Errorf("check for function with hash '%X' failed: %v", hash, err)
+		return api.Function{}, fmt.Errorf("check for function with hash '%X' failed: %w", hash, err)
 	}
 
 	if exists {
@@ -49,7 +49,7 @@ func (svc *CommanderService) CreateFunction(
 
 	newFunc, err := svc.db.CreateFunction(ctx, funcPath, funcName, hash)
 	if err != nil {
-		return api.Function{}, fmt.Errorf("persisting new function failed: %v", err)
+		return api.Function{}, fmt.Errorf("persisting new function failed: %w", err)
 	}
 
 	return api.Function{Id: newFunc.ID, Name: newFunc.Name}, nil

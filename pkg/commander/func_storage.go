@@ -3,11 +3,12 @@ package commander
 import (
 	"crypto/sha256"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/Nesquiko/servermore/pkg/server"
 )
 
 type AbsolutePath = string
@@ -44,34 +45,12 @@ func (s *FileSystemFunctionStorage) Save(
 ) (string, error) {
 	funcPath := filepath.Join(s.storageRoot, functionFilename(funcName, hash))
 
-	f, err := os.Create(funcPath)
+	err := server.CreateFile(funcPath, funcBytes)
 	if err != nil {
 		return "", err
 	}
 
-	_, err = f.Write(funcBytes)
-	if err != nil {
-		deleteFile(funcPath)
-		return "", err
-	}
-
-	if err := f.Close(); err != nil {
-		deleteFile(funcPath)
-		return "", err
-	}
 	return funcPath, nil
-}
-
-func deleteFile(fPath AbsolutePath) {
-	if err := os.Remove(fPath); err != nil {
-		slog.Error(
-			"there was an error deleting file",
-			"fPath",
-			fPath,
-			"error",
-			err,
-		)
-	}
 }
 
 func functionFilename(funcName string, hash []byte) string {

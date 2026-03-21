@@ -11,28 +11,32 @@ import (
 
 	"github.com/Nesquiko/servermore/pkg/commander"
 	"github.com/Nesquiko/servermore/pkg/server"
+	testutils "github.com/Nesquiko/servermore/test/test_utils"
 )
 
-var ServerUrl string
+var (
+	ServerUrl       string
+	TestStorageRoot string
+	DbFilePath      string
+)
 
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	port, err := randomFreePort()
+	port, err := testutils.RandomFreePort()
 	if err != nil {
-		slog.Error("failed to allocate test port", "error", err.Error())
+		slog.Error("failed to allocate test port", "error", err)
 		os.Exit(1)
 	}
 
-	tmpDir, err := subdirInTempDir("commander")
+	TestStorageRoot, err = testutils.SubdirInTempDir("commander")
 	if err != nil {
-		slog.Error("failed to allocate test port", "error", err.Error())
+		slog.Error("failed to create commander tmpDir", "error", err)
 		os.Exit(1)
 	}
-
-	dbFilePath := filepath.Join(tmpDir, "test-commander.db")
+	DbFilePath = filepath.Join(TestStorageRoot, "test-commander.db")
 
 	config := commander.CommanderHTTPServerConfig{
 		AppName:         "test-commander",
@@ -41,8 +45,8 @@ func TestMain(m *testing.M) {
 		Host:            "localhost",
 		Port:            port,
 		BaseURL:         "",
-		DbURI:           "file:" + dbFilePath,
-		FuncStorageRoot: tmpDir,
+		DbURI:           DbFilePath,
+		FuncStorageRoot: TestStorageRoot,
 	}
 	ServerUrl = fmt.Sprintf("http://%s:%s", config.Host, config.Port)
 
@@ -53,28 +57,27 @@ func TestMain(m *testing.M) {
 
 	readyErrCh := make(chan error, 1)
 	go func() {
-		readyErrCh <- waitForReady(ctx, 1*time.Second, 100*time.Millisecond, ServerUrl+server.HeartbeatEndpoint)
+		readyErrCh <- testutils.WaitForHttpReady(ctx, 1*time.Second, 100*time.Millisecond, ServerUrl+server.HeartbeatEndpoint)
 	}()
 
 	select {
 	case err = <-runErrCh:
 		if err != nil {
-			slog.Error("commander exited before becoming ready", "error", err.Error())
+			slog.Error("commander exited before becoming ready", "error", err)
 			os.Exit(1)
 		}
 		slog.Error("commander exited before becoming ready")
 		os.Exit(1)
 	case err = <-readyErrCh:
-	}
-
-	if err != nil {
-		slog.Error("ready endpoint not answering", "error", err.Error())
-		os.Exit(1)
+		if err != nil {
+			slog.Error("ready endpoint not answering", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	exitCode := m.Run()
-	if err := os.RemoveAll(tmpDir); err != nil {
-		slog.Error("failed to remove temp dir", "dir", tmpDir, "error", err)
+	if err := os.RemoveAll(TestStorageRoot); err != nil {
+		slog.Error("failed to remove temp dir", "dir", TestStorageRoot, "error", err)
 	}
 
 	os.Exit(exitCode)

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Nesquiko/servermore/pkg/queries.gen"
+	"github.com/Nesquiko/servermore/pkg/commander/queries.gen"
 	"github.com/golang-migrate/migrate/v4"
 	sqlitemigrate "github.com/golang-migrate/migrate/v4/database/sqlite"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
@@ -42,11 +42,11 @@ func NewSQLiteDB(dbUri string) (*SQLiteCommanderDB, error) {
 	}
 
 	if err = db.Ping(); err != nil {
-		return nil, fmt.Errorf("ping failed: %v", err)
+		return nil, fmt.Errorf("ping failed: %w", err)
 	}
 
 	if err = migrateUp(db); err != nil {
-		return nil, fmt.Errorf("migrate db schema failed: %v", err)
+		return nil, fmt.Errorf("migrate db schema failed: %w", err)
 	}
 
 	return &SQLiteCommanderDB{queries: queries.New(db)}, nil
@@ -55,16 +55,16 @@ func NewSQLiteDB(dbUri string) (*SQLiteCommanderDB, error) {
 func migrateUp(db *sql.DB) error {
 	source, err := iofs.New(migrations, "migrations")
 	if err != nil {
-		return fmt.Errorf("failed to read migrations: %v", err)
+		return fmt.Errorf("failed to read migrations: %w", err)
 	}
 
 	driver, err := sqlitemigrate.WithInstance(db, &sqlitemigrate.Config{})
 	if err != nil {
-		return fmt.Errorf("failed to create sqlite migrate driver: %v", err)
+		return fmt.Errorf("failed to create sqlite migrate driver: %w", err)
 	}
 	m, err := migrate.NewWithInstance("iofs", source, "sqlite", driver)
 	if err != nil {
-		return fmt.Errorf("failed to initialize migrate: %v", err)
+		return fmt.Errorf("failed to initialize migrate: %w", err)
 	}
 	m.Log = slogLogger{verbose: true}
 
@@ -130,7 +130,7 @@ func withRetry[R any](ctx context.Context, f func(context.Context) (R, error)) (
 		}
 
 		if retries >= MaxRetries {
-			return result, fmt.Errorf("db function errored more than max times: %v", err)
+			return result, fmt.Errorf("db function errored more than max times: %w", err)
 		}
 		retries++
 

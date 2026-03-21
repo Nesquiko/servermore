@@ -1,12 +1,12 @@
 version: "2"
 sql:
   - engine: "sqlite"
-    queries: "./db/queries.sql"
-    schema: "./pkg/commander/migrations"
+    queries: "./queries.sql"
+    schema: "./migrations"
     gen:
       go:
         package: "queries"
-        out: "./pkg/queries.gen"
+        out: "./queries.gen"
         emit_empty_slices: true
         emit_sql_as_comment: true
         query_parameter_limit: 1

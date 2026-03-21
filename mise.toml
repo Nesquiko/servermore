@@ -9,11 +9,14 @@ protoc-gen-go = "1.36.11"
 protoc-gen-go-grpc = "1.6.1"
 
 [tasks.test]
+description = "Runs all the test in repo"
 usage = '''
 flag "--count <count>" help="How many times to run tests" default="1"
 '''
 run = [
 	'go build -o ./tmp/testing-guest ./test/testing-guest',
+	'sqlc -f ./test/test_utils/sqlc.yaml compile',
+	'sqlc -f ./test/test_utils/sqlc.yaml generate',
 	'go test -v ${usage_count:+-count ${usage_count}} ./...'
 ]
 

@@ -32,7 +32,7 @@ var _ api.ServerInterface = (*CommanderHTTPServer)(nil)
 func NewCommanderServer(conf CommanderHTTPServerConfig) (*CommanderHTTPServer, error) {
 	funcStorage, err := NewFSFunctionStorage(conf.FuncStorageRoot)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize function storage: %v", err)
+		return nil, fmt.Errorf("failed to initialize function storage: %w", err)
 	}
 
 	db, err := NewSQLiteDB(conf.DbURI)
