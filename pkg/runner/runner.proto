@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package runner;
+option go_package = "github.com/Nesquiko/servermore/pkg/runner";
+
+message HeartbeatRequest {}
+message HeartbeatResponse {
+  // instance_id to the queue depth on the runner
+  map<string, uint32> queue_depths = 1;
+}
+
+message PrepareInstanceRequest {
+  int64 function_id = 1;
+  string function_path = 2;
+}
+
+message PrepareInstanceResponse {
+  string instance_id = 1;
+  bool downloaded = 2;
+}
+
+message InvokeInstanceRequest {
+  string instance_id = 1;
+  string method = 2;
+  string path = 3;
+  map<string, string> headers = 4;
+  bytes body = 5;
+}
+
+message InvokeInstanceResponse {
+  uint32 status_code = 1;
+  map<string, string> headers = 2;
+  bytes body = 3;
+}
+
+service Runner {
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse) {}
+
+  rpc PrepareFunctionInstance(PrepareInstanceRequest) returns (PrepareInstanceResponse) {}
+
+  rpc InvokeFunctionInstance(InvokeInstanceRequest) returns (InvokeInstanceResponse) {}
+}

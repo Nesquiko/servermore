@@ -22,7 +22,7 @@ func main() {
 		AppVersion: "0.0.1",
 		Env:        "LOCAL",
 	}
-	otelCfg, shutdown, err := server.InitOTEL(ctx, opts)
+	otelCfg, shutdown, err := server.InitHttpOTEL(ctx, opts)
 	if err != nil {
 		slog.Error("failed to initialize OTEL", "error", err)
 		return
@@ -37,7 +37,7 @@ func main() {
 	baseUrl := fmt.Sprintf("/{%s}", FunctionIdPathParam)
 
 	r.Use(
-		server.CreateLogger(opts),
+		server.CreateHTTPLogger(opts),
 		otelchi.Middleware(opts.AppName, otelchi.WithChiRoutes(r)),
 		otelchimetric.NewRequestDurationMillis(otelCfg),
 		otelchimetric.NewRequestInFlight(otelCfg),

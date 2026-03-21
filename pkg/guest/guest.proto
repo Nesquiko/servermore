@@ -20,6 +20,6 @@ message HeartbeatRequest {}
 message HeartbeatResponse {}
 
 service Guest {
-  rpc InvokeFunction(InvocationRequest) returns (InvocationResponse) {}
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse) {}
+  rpc InvokeFunction(InvocationRequest) returns (InvocationResponse) {}
 }

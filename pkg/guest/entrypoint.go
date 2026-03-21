@@ -9,7 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"github.com/Nesquiko/servermore/pkg/server"
 	"google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -21,8 +21,7 @@ const (
 	GuestLogComponentKey   = "component"
 	GuestLogComponentValue = "guest_sdk"
 
-	GuestHostEnvVar = "GUEST_HOST"
-	GuestPortEnvVar = "GUEST_PORT"
+	GuestAddrEnvVar = "GUEST_ADDR"
 )
 
 func Start(f FunctionHandler) {
@@ -41,24 +40,28 @@ func start(f FunctionHandler, sdkLogger *slog.Logger) error {
 		return fmt.Errorf("function handler is nil")
 	}
 
-	host := os.Getenv(GuestHostEnvVar)
-	port := os.Getenv(GuestPortEnvVar)
+	addr := os.Getenv(GuestAddrEnvVar)
 
-	if host == "" || port == "" {
-		return fmt.Errorf("no host or port configured, host=%q, port=%q", host, port)
+	monitoringOpts := server.MonitoringOpts{
+		AppName:    "guest-sdk",
+		AppVersion: "n/a",
+		Env:        "LOCAL",
 	}
 
-	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%s", host, port))
+	if addr == "" {
+		return fmt.Errorf("no addr configured")
+	}
+
+	lis, err := net.Listen("tcp", addr)
 	if err != nil {
-		return fmt.Errorf("failed to listen on host %q and port %q: %w", host, port, err)
+		return fmt.Errorf("failed to listen on addr %q: %w", addr, err)
 	}
 	// lis.Close by the grpcServer
 
-	grpcServer := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()))
+	grpcServer := server.InstrumentedGrpcServer(monitoringOpts)
 	RegisterGuestServer(grpcServer, &guestServer{f: f})
 
 	errCh := make(chan error, 1)
-
 	go func() {
 		if err := grpcServer.Serve(lis); err != nil && err != grpc.ErrServerStopped {
 			errCh <- fmt.Errorf("grpc server failed to serve: %w", err)

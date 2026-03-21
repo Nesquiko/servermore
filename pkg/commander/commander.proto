@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package commander;
+option go_package = "github.com/Nesquiko/servermore/pkg/commander";
+
+message HeartbeatRequest {}
+message HeartbeatResponse {}
+
+message RunnerPingResponse {}
+
+message RegisterRunnerRequest {
+  string addr = 1;
+}
+
+message RegisterRunnerResponse {
+  int64 runner_id = 1;
+}
+
+message DownloadFunctionRequest {
+  int64 function_id = 1;
+}
+
+message DownloadFunctionResponse {
+  string function_path = 1;
+  string function_filename = 2;
+  bytes file_bytes = 3;
+}
+
+message RouteFunctionRequest {
+  int64 function_id = 1;
+}
+
+message RouteFunctionResponse {
+  string runner_addr = 1;
+  string instance_id = 2;
+}
+
+service Commander {
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse) {}
+
+  rpc RegisterRunner(RegisterRunnerRequest) returns (RegisterRunnerResponse) {}
+
+  rpc DownloadFunction(DownloadFunctionRequest) returns (DownloadFunctionResponse) {}
+
+  rpc RouteFunction(RouteFunctionRequest) returns (RouteFunctionResponse) {}
+}

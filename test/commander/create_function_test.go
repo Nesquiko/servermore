@@ -18,8 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var TestingBinaryPath = filepath.Join("..", "..", "tmp", "testing-guest")
-
 func TestCreateFunction_Created(t *testing.T) {
 	t.Parallel()
 
@@ -193,31 +191,6 @@ func TestCreateFunction_BadRequestWhenBinaryMissing(t *testing.T) {
 	assert.NotEmpty(t, apiErr.Code)
 	assert.NotEmpty(t, apiErr.Title)
 	assert.NotEmpty(t, apiErr.Detail)
-}
-
-func createFunctionMultipartBody(t *testing.T, name string, binaryPath string) (*os.File, string) {
-	t.Helper()
-
-	binaryBytes, err := os.ReadFile(binaryPath)
-	require.NoError(t, err, "read binary file")
-
-	bodyFile, err := os.CreateTemp(t.TempDir(), "create-function-body-*.multipart")
-	require.NoError(t, err, "create temp multipart body file")
-
-	writer := multipart.NewWriter(bodyFile)
-	require.NoError(t, writer.WriteField("name", name), "write multipart name field")
-
-	part, err := writer.CreateFormFile("binary", filepath.Base(binaryPath))
-	require.NoError(t, err, "create multipart file part")
-
-	_, err = part.Write(binaryBytes)
-	require.NoError(t, err, "write multipart binary part")
-	require.NoError(t, writer.Close(), "close multipart writer")
-
-	_, err = bodyFile.Seek(0, 0)
-	require.NoError(t, err, "rewind multipart body file")
-
-	return bodyFile, writer.FormDataContentType()
 }
 
 func randomBinary(t *testing.T, size int) []byte {

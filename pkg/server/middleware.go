@@ -12,13 +12,13 @@ import (
 
 const HeartbeatEndpoint = "/monitoring/heartbeat"
 
-func Middleware(
+func HttpMiddleware(
 	otelCfg otelchimetric.BaseConfig,
 	loggingOpts MonitoringOpts,
 ) []commonapi.MiddlewareFunc {
 	return []commonapi.MiddlewareFunc{
 		withAPIErrorHolder,
-		CreateLogger(loggingOpts),
+		CreateHTTPLogger(loggingOpts),
 		middleware.Recoverer,
 		otelchimetric.NewRequestDurationMillis(otelCfg),
 		otelchimetric.NewRequestInFlight(otelCfg),

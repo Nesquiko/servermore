@@ -9,7 +9,9 @@ import (
 	"os"
 
 	"github.com/go-chi/httplog/v3"
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
 	otelchimetric "github.com/riandyrn/otelchi/metric"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
@@ -18,6 +20,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type MonitoringOpts struct {
@@ -25,13 +29,27 @@ type MonitoringOpts struct {
 
 	AppName    string
 	AppVersion string
-	Env        string
+	// Env value: PROD | TEST | LOCAL
+	Env string
+}
+
+func InitHttpOTEL(
+	ctx context.Context,
+	opts MonitoringOpts,
+) (otelchimetric.BaseConfig, func(ctx context.Context) error, error) {
+	mp, closer, err := InitOTEL(ctx, opts)
+	if err != nil {
+		return otelchimetric.BaseConfig{}, nil, fmt.Errorf("OTEL initialization failed: %w", err)
+	}
+
+	baseCfg := otelchimetric.NewBaseConfig(opts.AppName, otelchimetric.WithMeterProvider(mp))
+	return baseCfg, closer, nil
 }
 
 func InitOTEL(
 	ctx context.Context,
 	opts MonitoringOpts,
-) (otelchimetric.BaseConfig, func(ctx context.Context) error, error) {
+) (*sdkmetric.MeterProvider, func(ctx context.Context) error, error) {
 	res, err := resource.New(
 		ctx,
 		resource.WithAttributes(
@@ -41,25 +59,16 @@ func InitOTEL(
 		),
 	)
 	if err != nil {
-		return otelchimetric.BaseConfig{}, nil, fmt.Errorf(
-			"failed to initialize resource: %w",
-			err,
-		)
+		return nil, nil, fmt.Errorf("failed to initialize resource: %w", err)
 	}
 
 	tp, err := InitTracerProvider(ctx, res, opts)
 	if err != nil {
-		return otelchimetric.BaseConfig{}, nil, fmt.Errorf(
-			"failed to initialize tracer provider: %w",
-			err,
-		)
+		return nil, nil, fmt.Errorf("failed to initialize tracer provider: %w", err)
 	}
 	mp, err := InitMeter(ctx, res, opts)
 	if err != nil {
-		return otelchimetric.BaseConfig{}, nil, fmt.Errorf(
-			"failed to initialize meter provider: %w",
-			err,
-		)
+		return nil, nil, fmt.Errorf("failed to initialize meter provider: %w", err)
 	}
 
 	otel.SetTracerProvider(tp)
@@ -78,9 +87,8 @@ func InitOTEL(
 			tp.Shutdown(ctx),
 		)
 	}
-	baseCfg := otelchimetric.NewBaseConfig(opts.AppName, otelchimetric.WithMeterProvider(mp))
 
-	return baseCfg, closer, nil
+	return mp, closer, nil
 }
 
 func InitTracerProvider(
@@ -127,17 +135,11 @@ func InitMeter(
 	return sdkmetric.NewMeterProvider(providerOpts...), nil
 }
 
-func CreateLogger(opts MonitoringOpts) func(http.Handler) http.Handler {
+func CreateHTTPLogger(opts MonitoringOpts) func(http.Handler) http.Handler {
 	logSchema := httplog.SchemaOTEL
 	logFmt := logSchema.Concise(opts.IsDev)
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		ReplaceAttr: logFmt.ReplaceAttr,
-	})).With(
-		slog.String("app", opts.AppName),
-		slog.String("version", opts.AppVersion),
-		slog.String("env", opts.Env),
-	)
+	logger := slogLogger(opts, &slog.HandlerOptions{ReplaceAttr: logFmt.ReplaceAttr})
 
 	return httplog.RequestLogger(logger, &httplog.Options{
 		Level:             slog.LevelInfo,
@@ -162,4 +164,55 @@ func CreateLogger(opts MonitoringOpts) func(http.Handler) http.Handler {
 			return attrs
 		},
 	})
+}
+
+func InstrumentedGrpcServer(opts MonitoringOpts) *grpc.Server {
+	return grpc.NewServer(
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+		grpc.ChainUnaryInterceptor(grpcServerLogger(opts)),
+	)
+}
+
+func InstrumentedGrpcClient(addr string, opts MonitoringOpts) (conn *grpc.ClientConn, err error) {
+	return grpc.NewClient(
+		addr,
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithChainUnaryInterceptor(grpcClientLogger(opts)),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+}
+
+func grpcServerLogger(opts MonitoringOpts) grpc.UnaryServerInterceptor {
+	grpcInterceptor, grpcLoggingOpts := grpcLogger(opts)
+	return logging.UnaryServerInterceptor(grpcInterceptor, grpcLoggingOpts...)
+}
+
+func grpcClientLogger(opts MonitoringOpts) grpc.UnaryClientInterceptor {
+	grpcInterceptor, grpcLoggingOpts := grpcLogger(opts)
+	return logging.UnaryClientInterceptor(grpcInterceptor, grpcLoggingOpts...)
+}
+
+func grpcLogger(opts MonitoringOpts) (logging.LoggerFunc, []logging.Option) {
+	logger := slogLogger(opts, nil)
+
+	grpcLoggingOpts := []logging.Option{
+		logging.WithLogOnEvents(logging.FinishCall),
+		logging.WithDurationField(logging.DurationToDurationField),
+	}
+
+	// grpcInterceptorLogger adapts slog logger to interceptor logger.
+	grpcInterceptor := logging.LoggerFunc(
+		func(ctx context.Context, lvl logging.Level, msg string, fields ...any) {
+			logger.Log(ctx, slog.Level(lvl), msg, fields...)
+		})
+
+	return grpcInterceptor, grpcLoggingOpts
+}
+
+func slogLogger(opts MonitoringOpts, slogOpts *slog.HandlerOptions) *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stdout, slogOpts)).With(
+		slog.String("app", opts.AppName),
+		slog.String("version", opts.AppVersion),
+		slog.String("env", opts.Env),
+	)
 }

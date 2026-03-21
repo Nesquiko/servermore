@@ -3,7 +3,6 @@ package commander
 import (
 	"crypto/sha256"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -18,15 +17,9 @@ type FileSystemFunctionStorage struct {
 }
 
 func NewFSFunctionStorage(storageRoot AbsolutePath) (*FileSystemFunctionStorage, error) {
-	rootInfo, err := os.Stat(storageRoot)
-	if err != nil && os.IsNotExist(err) {
-		if err := os.MkdirAll(storageRoot, 0o755); err != nil {
-			return nil, fmt.Errorf("failed to create storage root %q: %w", storageRoot, err)
-		}
-	} else if err != nil {
+	err := server.CreateDirIfNotExists(storageRoot)
+	if err != nil {
 		return nil, err
-	} else if !rootInfo.IsDir() {
-		return nil, fmt.Errorf("storage root '%s' exists, but is not directory", storageRoot)
 	}
 
 	return &FileSystemFunctionStorage{storageRoot: storageRoot}, nil

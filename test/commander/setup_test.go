@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/Nesquiko/servermore/pkg/commander"
 	"github.com/Nesquiko/servermore/pkg/server"
@@ -57,7 +56,7 @@ func TestMain(m *testing.M) {
 
 	readyErrCh := make(chan error, 1)
 	go func() {
-		readyErrCh <- testutils.WaitForHttpReady(ctx, 1*time.Second, 100*time.Millisecond, ServerUrl+server.HeartbeatEndpoint)
+		readyErrCh <- testutils.WaitForHttpReady(ctx, "commander", ServerUrl+server.HeartbeatEndpoint)
 	}()
 
 	select {

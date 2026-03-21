@@ -21,6 +21,8 @@ import (
 	"google.golang.org/grpc/connectivity"
 )
 
+var TestingBinaryPath = filepath.Join("..", "..", "tmp", "testing-guest")
+
 // SubdirInTempDir creates new directory in the /tmp/servermore-*/subdir,
 // However the subdir is not created, to let the app handle the creation itself
 func SubdirInTempDir(subdir string) (string, error) {
@@ -48,8 +50,19 @@ func RandomFreePort() (string, error) {
 
 // WaitForHttpReady calls the specified endpoint until it gets a 200
 // response or until the context is cancelled or the timeout is reached.
-func WaitForHttpReady(
+func WaitForHttpReady(ctx context.Context, serverLabel string, fullEntpointPath string) error {
+	return WaitForHttpReadyWithTiming(
+		ctx,
+		serverLabel,
+		1*time.Second,
+		100*time.Millisecond,
+		fullEntpointPath,
+	)
+}
+
+func WaitForHttpReadyWithTiming(
 	ctx context.Context,
+	serverLabel string,
 	timeout time.Duration,
 	interval time.Duration,
 	fullEntpointPath string,
@@ -73,7 +86,11 @@ func WaitForHttpReady(
 		}
 
 		if resp.StatusCode == http.StatusOK {
-			slog.Info("http server is ready after", "time", time.Since(startTime))
+			slog.Info(
+				"http server is ready after",
+				"server.label", serverLabel,
+				"time", time.Since(startTime),
+			)
 			resp.Body.Close()
 			return nil
 		}
@@ -93,8 +110,13 @@ func WaitForHttpReady(
 
 // WaitForGrpcReady calls the heartbeat function until it succeds
 // or until the context is cancelled or the timeout is reached.
-func WaitForGrpcReady(
+func WaitForGrpcReady(ctx context.Context, serverLabel string, addr string) error {
+	return WaitForGrpcReadyWithTiming(ctx, serverLabel, 1*time.Second, 100*time.Millisecond, addr)
+}
+
+func WaitForGrpcReadyWithTiming(
 	ctx context.Context,
+	serverLabel string,
 	timeout time.Duration,
 	interval time.Duration,
 	addr string,
@@ -105,6 +127,7 @@ func WaitForGrpcReady(
 		AppVersion: "n/a",
 		Env:        "TEST",
 	}
+	startTime := time.Now()
 	conn, err := server.InstrumentedGrpcClient(addr, waitingOpts)
 	if err != nil {
 		return fmt.Errorf("failed to initialize grpc connection: %w", err)
@@ -112,12 +135,15 @@ func WaitForGrpcReady(
 	defer runner.CloseConn(conn)
 	conn.Connect()
 
-	startTime := time.Now()
 	for {
 		state := conn.GetState()
 
 		if state == connectivity.Ready {
-			slog.Info("grpc server is ready after", "time", time.Since(startTime))
+			slog.Info(
+				"grpc server is ready after",
+				"server.label", serverLabel,
+				"time", time.Since(startTime),
+			)
 			return nil
 		}
 

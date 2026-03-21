@@ -8,25 +8,22 @@ protoc = "34.0"
 protoc-gen-go = "1.36.11"
 protoc-gen-go-grpc = "1.6.1"
 
+[tasks.build]
+depends = ['sqlc-generate', 'openapi-generate', 'grpc-generate']
+run = 'go build ./...'
+
 [tasks.test]
 description = "Runs all the test in repo"
 usage = '''
 flag "--count <count>" help="How many times to run tests" default="1"
 '''
+depends = ['build']
 run = [
 	'go build -o ./tmp/testing-guest ./test/testing-guest',
 	'sqlc -f ./test/test_utils/sqlc.yaml compile',
 	'sqlc -f ./test/test_utils/sqlc.yaml generate',
 	'go test -v ${usage_count:+-count ${usage_count}} ./...'
 ]
-
-[tasks.dev-gateway]
-description = "Runs gateway setup for local development with hot reloading"
-run = 'air --build.cmd "go build -o ./tmp/gateway ./cmd/gateway" --build.entrypoint "./tmp/gateway"'
-
-[tasks.commander]
-description = "Runs commander setup for local development with hot reloading"
-run = 'air --build.cmd "go build -o ./tmp/commander ./cmd/commander" --build.entrypoint "./tmp/commander"'
 
 [tasks.add-migration]
 description = "Adds new migration"
@@ -38,11 +35,11 @@ run = 'migrate create -dir ./db/migrations -ext sql ${usage_migration_name}'
 [tasks.sqlc-generate]
 description = "Runs sqlc to generate Go code for queries"
 run = [
-	'sqlc compile',
-	'sqlc generate'
+	'sqlc -f ./pkg/commander/sqlc.yaml compile',
+	'sqlc -f ./pkg/commander/sqlc.yaml generate'
 ]
 
-[tasks.commander-openapi-generate]
+[tasks.openapi-generate]
 description = "Generates code from openapi specs in ./api/"
 run = [
 	'oapi-codegen --config ./pkg/api/commander-api-codegen.yaml ./api/commander-openapi.yaml',
@@ -52,5 +49,7 @@ run = [
 [tasks.grpc-generate]
 description = "Generates code from proto files"
 run = [
-	'protoc --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:. pkg/guest/guest.proto'
+	'protoc --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:. pkg/guest/guest.proto',
+	'protoc --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:. pkg/runner/runner.proto',
+	'protoc --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:. pkg/commander/commander.proto'
 ]
