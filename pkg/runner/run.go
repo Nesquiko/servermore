@@ -19,8 +19,12 @@ type RunnerConfig struct {
 	CommitHash string
 	Env        string
 
-	Addr                  string
-	CommanderAddress      string
+	Addr string
+
+	CommanderHost     string
+	CommanderHttpPort string
+	CommanderGrpcPort string
+
 	InstanceShutdownAfter time.Duration
 	FuncStorageRoot       string
 }

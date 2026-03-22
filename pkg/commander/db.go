@@ -85,7 +85,7 @@ func (s *SQLiteCommanderDB) CreateFunction(
 	name string,
 	hash []byte,
 ) (queries.Function, error) {
-	f, err := withRetry(ctx, func(ctx context.Context) (queries.Function, error) {
+	f, err := WithRetry(ctx, func(ctx context.Context) (queries.Function, error) {
 		return s.queries.CreateFunction(
 			ctx,
 			queries.CreateFunctionParams{Path: path, Name: name, Hash: hash},
@@ -100,7 +100,7 @@ func (s *SQLiteCommanderDB) CreateFunction(
 
 // FunctionByID implements [CommanderDB].
 func (s *SQLiteCommanderDB) FunctionByID(ctx context.Context, id int64) (queries.Function, error) {
-	f, err := withRetry(ctx, func(ctx context.Context) (queries.Function, error) {
+	f, err := WithRetry(ctx, func(ctx context.Context) (queries.Function, error) {
 		return s.queries.FunctionByID(ctx, id)
 	})
 	if err != nil {
@@ -112,7 +112,7 @@ func (s *SQLiteCommanderDB) FunctionByID(ctx context.Context, id int64) (queries
 
 // FunctionExistsByHash implements [CommanderDB].
 func (s *SQLiteCommanderDB) FunctionExistsByHash(ctx context.Context, hash []byte) (bool, error) {
-	exists, err := withRetry(ctx, func(ctx context.Context) (int64, error) {
+	exists, err := WithRetry(ctx, func(ctx context.Context) (int64, error) {
 		return s.queries.FunctionExistsByHash(ctx, hash)
 	})
 	if err != nil {
@@ -124,7 +124,7 @@ func (s *SQLiteCommanderDB) FunctionExistsByHash(ctx context.Context, hash []byt
 
 const MaxRetries = 10
 
-func withRetry[R any](ctx context.Context, f func(context.Context) (R, error)) (R, error) {
+func WithRetry[R any](ctx context.Context, f func(context.Context) (R, error)) (R, error) {
 	retries := 1
 	for {
 		result, err := f(ctx)

@@ -52,16 +52,23 @@ func newRunnerGrpcServer(
 		)
 	}
 
-	httpClient, err := commanderclient.NewClient("http://" + conf.CommanderAddress)
+	commanderHttpAddr := fmt.Sprintf("http://%s:%s", conf.CommanderHost, conf.CommanderHttpPort)
+	httpClient, err := commanderclient.NewClient(commanderHttpAddr)
 	if err != nil {
+		slog.Error(
+			"failed to initialize http commander client",
+			"commander.http.address", commanderHttpAddr,
+			"error", err,
+		)
 		return nil, nil, fmt.Errorf("creating commander http client failed: %w", err)
 	}
 
-	conn, err := server.InstrumentedGrpcClient(conf.CommanderAddress, monitoringOpts)
+	commanderGrpcAddr := fmt.Sprintf("%s:%s", conf.CommanderHost, conf.CommanderGrpcPort)
+	conn, err := server.LoggingGrpcClient(commanderGrpcAddr, monitoringOpts)
 	if err != nil {
 		slog.Error(
 			"failed to initialize grpc commander client",
-			"commander.address", conf.CommanderAddress,
+			"commander.grpc.address", commanderGrpcAddr,
 			"error", err,
 		)
 		return nil, nil, fmt.Errorf("failed to initialize grpc commander client: %w", err)
@@ -108,12 +115,17 @@ func (r *runnerGrpcServer) PrepareFunctionInstance(
 	req *PrepareInstanceRequest,
 ) (*PrepareInstanceResponse, error) {
 	funcPath := r.pathOnRunner(req.FunctionPath)
+	meta := &server.DownloadMeta{FunctionID: req.FunctionId, DownloadPath: req.FunctionPath}
+	server.SetDownloadMeta(ctx, meta)
+
 	exists, err := funcFileExists(funcPath)
 	if err != nil {
 		return nil, fmt.Errorf("function path existence check fail: %w", err)
 	}
 
 	if exists {
+		meta.ReusedFromFS = true
+		meta.StoredPath = funcPath
 		instanceId, err := r.startInstance(ctx, funcPath)
 		if err != nil {
 			return nil, fmt.Errorf("starting instance failed: %w", err)
@@ -124,6 +136,7 @@ func (r *runnerGrpcServer) PrepareFunctionInstance(
 	isDownloading, resultConsumers, downloadCh := r.downloads.IsDownloadedOrStartDownload(funcPath)
 
 	if isDownloading {
+		meta.ReusedInFlight = true
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -131,6 +144,7 @@ func (r *runnerGrpcServer) PrepareFunctionInstance(
 			if downloadResult.err != nil {
 				return nil, fmt.Errorf("download result errored: %w", downloadResult.err)
 			}
+			meta.StoredPath = downloadResult.path
 
 			instanceId, err := r.startInstance(ctx, downloadResult.path)
 			if err != nil {
@@ -140,12 +154,16 @@ func (r *runnerGrpcServer) PrepareFunctionInstance(
 		}
 	}
 
-	funcFilePath, err := r.downloadFunction(ctx, req.FunctionId)
-	r.downloads.Delete(funcFilePath)
+	funcFilePath, bytesWritten, downloadTook, err := r.downloadFunction(ctx, req.FunctionId)
+	r.downloads.Delete(funcPath)
 	resultConsumers.SubmitResult(DownloadResult{path: funcFilePath, err: err})
 	if err != nil {
 		return nil, fmt.Errorf("download errored: %w", err)
 	}
+	meta.Downloaded = true
+	meta.StoredPath = funcFilePath
+	meta.BytesWritten = bytesWritten
+	meta.DownloadTook = downloadTook
 
 	instanceId, err := r.startInstance(ctx, funcFilePath)
 	if err != nil {
@@ -163,13 +181,21 @@ func (r *runnerGrpcServer) startInstance(
 		return uuid.Nil, fmt.Errorf("failed to construct uuid v7: %w", err)
 	}
 
+	meta := &server.InstanceStartMeta{FunctionPath: funcFilePath, InstanceID: instanceId.String()}
+	server.SetInstanceStartMeta(ctx, meta)
+
 	isAssigned, idConsumers, idCh := r.instances.IsAssignedOrStartIt(funcFilePath)
 	if isAssigned {
-		return <-idCh, nil
+		assignedID := <-idCh
+		meta.InstanceID = assignedID.String()
+		meta.ReusedAssigned = true
+		return assignedID, nil
 	}
 
 	funcRuntime := DetermineFuncRuntime()
-	err = funcRuntime.Start(ctx, funcFilePath, r.monitoringOpts)
+	meta.RuntimeType = funcRuntime.Type()
+
+	err = funcRuntime.Start(ctx, funcFilePath)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("failed to start the instance: %w", err)
 	}
@@ -221,10 +247,10 @@ func (r *runnerGrpcServer) InvokeFunctionInstance(
 	}
 }
 
-const WorkerIdleTimeoutSeconds = 5 * time.Second
+const WorkerIdleTimeout = 5 * time.Second
 
 func (r *runnerGrpcServer) instanceWorker(instance *instanceState) {
-	timer := time.NewTimer(WorkerIdleTimeoutSeconds)
+	timer := time.NewTimer(WorkerIdleTimeout)
 	defer timer.Stop()
 
 outer:
@@ -249,7 +275,7 @@ outer:
 				req.resCh <- &InvocationResult{resp: &InvokeInstanceResponse{StatusCode: resp.StatusCode, Headers: resp.Headers, Body: resp.Body}}
 			}
 
-			if !timer.Reset(WorkerIdleTimeoutSeconds) {
+			if !timer.Reset(WorkerIdleTimeout) {
 				break outer
 			}
 		}
@@ -259,50 +285,81 @@ outer:
 func (r *runnerGrpcServer) downloadFunction(
 	ctx context.Context,
 	functionId int64,
-) (server.AbsolutePath, error) {
+) (server.AbsolutePath, int64, time.Duration, error) {
+	startTime := time.Now()
 	resp, err := r.commanderHttpClient.DownloadFunctionBinary(ctx, functionId)
 	if err != nil {
-		return "", fmt.Errorf("download function id '%d' failed: %w", functionId, err)
+		return "", 0, 0, fmt.Errorf("download function id '%d' failed: %w", functionId, err)
 	}
+	defer resp.Body.Close()
 
 	switch resp.StatusCode {
 	case http.StatusNotFound:
-		return "", fmt.Errorf("download failed, function with id '%d' wasn't found", functionId)
+		return "", 0, 0, fmt.Errorf(
+			"download failed, function with id '%d' wasn't found",
+			functionId,
+		)
 	case http.StatusInternalServerError:
-		return "", fmt.Errorf("download failed, commander errored")
+		return "", 0, 0, fmt.Errorf("download failed, commander errored")
 	}
 
 	responseFuncPath := resp.Header.Get(commander.DownloadHeaderFunctionPath)
 	responseFuncName := resp.Header.Get(commander.DownloadHeaderFunctionFilename)
 
-	funcPath := filepath.Join(responseFuncPath, responseFuncName)
-	funcPath = r.pathOnRunner(funcPath)
+	funcPath := r.pathOnRunner(filepath.Join(responseFuncPath, responseFuncName))
+	funcDir := filepath.Dir(funcPath)
 
-	if err := os.MkdirAll(filepath.Dir(funcPath), 0o755); err != nil {
-		return "", fmt.Errorf(
+	if err := os.MkdirAll(funcDir, 0o755); err != nil {
+		return "", 0, 0, fmt.Errorf(
 			"failed to create the dir %q path of downloaded function '%d': %w",
 			funcPath, functionId, err,
 		)
 	}
 
-	file, err := os.Create(funcPath)
+	tmpFile, err := os.CreateTemp(funcDir, fmt.Sprintf("%s-*", responseFuncName))
 	if err != nil {
-		return "", fmt.Errorf(
-			"failed to create the downloaded function file %q for function '%d': %w",
-			funcPath, functionId, err,
-		)
-	}
-	defer file.Close()
-
-	if _, err := io.Copy(file, resp.Body); err != nil {
-		server.DeleteFile(funcPath)
-		return "", fmt.Errorf(
-			"failed copy bytes of downloaded function file %q for function '%d': %w",
-			funcPath, functionId, err,
+		return "", 0, 0, fmt.Errorf(
+			"failed to create temp download file in dir %q for function '%d': %w",
+			funcDir, functionId, err,
 		)
 	}
 
-	return funcPath, nil
+	bytesWritten, err := io.Copy(tmpFile, resp.Body)
+	if err != nil {
+		server.DeleteFile(tmpFile.Name())
+		return "", 0, 0, fmt.Errorf(
+			"failed copy bytes of to temp function file %q for function '%d': %w",
+			tmpFile.Name(), functionId, err,
+		)
+	}
+
+	if err = tmpFile.Close(); err != nil {
+		server.DeleteFile(tmpFile.Name())
+		return "", 0, 0, fmt.Errorf(
+			"failed to close temp function file %q for function '%d': %w",
+			tmpFile.Name(), functionId, err,
+		)
+	}
+
+	err = os.Chmod(tmpFile.Name(), 0o755)
+	if err != nil {
+		server.DeleteFile(tmpFile.Name())
+		return "", 0, 0, fmt.Errorf(
+			"failed to change perms on temp function file %q for function '%d': %w",
+			tmpFile.Name(), functionId, err,
+		)
+	}
+
+	err = os.Rename(tmpFile.Name(), funcPath)
+	if err != nil {
+		server.DeleteFile(tmpFile.Name())
+		return "", 0, 0, fmt.Errorf(
+			"failed to rename temp function file %q to its original name %q: %w",
+			tmpFile.Name(), funcPath, err,
+		)
+	}
+
+	return funcPath, bytesWritten, time.Since(startTime), nil
 }
 
 func funcFileExists(path string) (bool, error) {

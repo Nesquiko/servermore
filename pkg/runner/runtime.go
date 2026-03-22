@@ -17,8 +17,11 @@ import (
 
 type NetworkAddr = string
 
+const NativeRuntimeType = "native"
+
 type FunctionRuntime interface {
-	Start(context.Context, server.AbsolutePath, server.MonitoringOpts) error
+	Type() string
+	Start(context.Context, server.AbsolutePath) error
 	Invoke(context.Context, *guest.InvocationRequest) (*guest.InvocationResponse, error)
 	Stop()
 }
@@ -37,18 +40,27 @@ type nativeRuntime struct {
 
 var _ FunctionRuntime = (*nativeRuntime)(nil)
 
+// Type implements [FunctionRuntime].
+func (n *nativeRuntime) Type() string {
+	return NativeRuntimeType
+}
+
 // Start implements [FunctionRuntime].
 func (n *nativeRuntime) Start(
 	ctx context.Context,
 	funcPath server.AbsolutePath,
-	opts server.MonitoringOpts,
 ) error {
+	startTime := time.Now()
+	meta := server.GetInstanceStartMeta(ctx)
+	assert.That(meta != nil, "instance start meta was nil")
+
 	port, err := FreePort()
 	if err != nil {
 		return fmt.Errorf("failed to acquire random free port: %w", err)
 	}
 
 	instanceAddr := fmt.Sprintf("127.0.0.1:%d", port)
+	meta.InstanceAddr = instanceAddr
 	instanceCmd := exec.Command(funcPath)
 	instanceCmd.Env = append(
 		instanceCmd.Env,
@@ -59,48 +71,35 @@ func (n *nativeRuntime) Start(
 		return fmt.Errorf("failed to start the binary: %w", err)
 	}
 
-	conn, err := server.InstrumentedGrpcClient(instanceAddr, opts)
+	conn, err := server.GrpcClient(instanceAddr)
 	if err != nil {
 		return fmt.Errorf("failed to initialize instance at addr=%q client: %w", instanceAddr, err)
 	}
 	instanceClient := guest.NewGuestClient(conn)
-
-	waitCh := make(chan error, 1)
-	go func() {
-		waitCh <- instanceCmd.Wait()
-	}()
 
 	readyCh := make(chan error, 1)
 	go func() {
 		readyCh <- waitForHeartbeat(ctx, instanceClient)
 	}()
 
-	select {
-	case waitErr := <-waitCh:
+	readyErr := <-readyCh
+	if readyErr != nil {
 		CloseConn(conn)
+		closeCmd(instanceCmd)
+		meta.StartTook = time.Since(startTime)
 		return fmt.Errorf(
-			"instance binary %q at addr %q failed during initialization: %w",
+			"instance binary %q at addr %q Heartbeat failed: %w",
 			funcPath,
 			instanceAddr,
-			waitErr,
+			readyErr,
 		)
-	case readyErr := <-readyCh:
-		if readyErr != nil {
-			CloseConn(conn)
-			closeCmd(instanceCmd)
-			return fmt.Errorf(
-				"instance binary %q at addr %q Heartbeat failed: %w",
-				funcPath,
-				instanceAddr,
-				readyErr,
-			)
-		}
 	}
 
 	n.cmd = instanceCmd
 	n.addr = instanceAddr
 	n.client = instanceClient
 	n.conn = conn
+	meta.StartTook = time.Since(startTime)
 	return nil
 }
 

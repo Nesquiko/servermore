@@ -10,7 +10,9 @@ import (
 
 	"github.com/Nesquiko/servermore/pkg/assert"
 	"github.com/Nesquiko/servermore/pkg/runner"
+	"github.com/Nesquiko/servermore/pkg/server"
 	testutils "github.com/Nesquiko/servermore/test/test_utils"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -37,7 +39,9 @@ func TestMain(m *testing.M) {
 		Env:                   "TEST",
 		AppName:               "testing-runner",
 		Addr:                  ServerUrl,
-		CommanderAddress:      StubCommander.GrpcAddr(),
+		CommanderHost:         StubCommander.Host(),
+		CommanderGrpcPort:     StubCommander.GrpcPort(),
+		CommanderHttpPort:     StubCommander.HttpPort(),
 		InstanceShutdownAfter: 1 * time.Second,
 		FuncStorageRoot:       TestRunnerStorageRoot,
 	}
@@ -75,4 +79,40 @@ func TestMain(m *testing.M) {
 	}
 
 	os.Exit(exitCode)
+}
+
+func newRunnerClient(t *testing.T) runner.RunnerClient {
+	t.Helper()
+
+	monitoringOpts := server.MonitoringOpts{
+		IsDev:      true,
+		AppName:    "runner-test-client",
+		AppVersion: "n/a",
+		Env:        "TEST",
+	}
+
+	conn, err := server.LoggingGrpcClient(ServerUrl, monitoringOpts)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		runner.CloseConn(conn)
+	})
+
+	return runner.NewRunnerClient(conn)
+}
+
+func prepareFunctionInstance(
+	t *testing.T,
+	client runner.RunnerClient,
+	functionID int64,
+	functionPath string,
+) (*runner.PrepareInstanceResponse, error) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	return client.PrepareFunctionInstance(ctx, &runner.PrepareInstanceRequest{
+		FunctionId:   functionID,
+		FunctionPath: functionPath,
+	})
 }

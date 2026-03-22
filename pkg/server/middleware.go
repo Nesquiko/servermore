@@ -17,7 +17,7 @@ func HttpMiddleware(
 	loggingOpts MonitoringOpts,
 ) []commonapi.MiddlewareFunc {
 	return []commonapi.MiddlewareFunc{
-		withAPIErrorHolder,
+		WithAPIErrorHolder,
 		CreateHTTPLogger(loggingOpts),
 		middleware.Recoverer,
 		otelchimetric.NewRequestDurationMillis(otelCfg),
@@ -33,7 +33,7 @@ type (
 	}
 )
 
-func withAPIErrorHolder(next http.Handler) http.Handler {
+func WithAPIErrorHolder(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		holder := &apiErrorHolder{}
 		ctx := context.WithValue(r.Context(), apiErrorKey{}, holder)

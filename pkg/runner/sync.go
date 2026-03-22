@@ -244,6 +244,7 @@ func (m *DownloadsSyncMap) IsDownloadedOrStartDownload(
 }
 
 func (m *DownloadsSyncMap) Delete(path server.AbsolutePath) {
+	assert.That(path != "", "path can't be empty")
 	m.downloads.Delete(path)
 }
 

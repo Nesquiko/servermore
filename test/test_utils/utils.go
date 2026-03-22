@@ -2,22 +2,19 @@ package testutils
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
-	"testing"
 	"time"
 
 	"github.com/Nesquiko/servermore/pkg/runner"
 	"github.com/Nesquiko/servermore/pkg/server"
-	testqueries "github.com/Nesquiko/servermore/test/test_utils/queries.gen"
-	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/connectivity"
 )
 
@@ -46,6 +43,14 @@ func RandomFreePort() (string, error) {
 	}
 
 	return strconv.Itoa(tcpAddr.Port), nil
+}
+
+func DeleteIfExists(path string) error {
+	err := os.Remove(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 // WaitForHttpReady calls the specified endpoint until it gets a 200
@@ -114,7 +119,7 @@ func WaitForHttpReadyWithTiming(
 // WaitForGrpcReady calls the heartbeat function until it succeds
 // or until the context is cancelled or the timeout is reached.
 func WaitForGrpcReady(ctx context.Context, serverLabel string, addr string) error {
-	return WaitForGrpcReadyWithTiming(ctx, serverLabel, 1*time.Second, 100*time.Millisecond, addr)
+	return WaitForGrpcReadyWithTiming(ctx, serverLabel, 3*time.Second, 100*time.Millisecond, addr)
 }
 
 func WaitForGrpcReadyWithTiming(
@@ -131,7 +136,7 @@ func WaitForGrpcReadyWithTiming(
 		Env:        "TEST",
 	}
 	startTime := time.Now()
-	conn, err := server.InstrumentedGrpcClient(addr, waitingOpts)
+	conn, err := server.LoggingGrpcClient(addr, waitingOpts)
 	if err != nil {
 		return fmt.Errorf("failed to initialize grpc connection: %w", err)
 	}
@@ -160,12 +165,4 @@ func WaitForGrpcReadyWithTiming(
 			time.Sleep(interval)
 		}
 	}
-}
-
-func TestDB(t *testing.T, dbPath string) *testqueries.Queries {
-	db, err := sql.Open("sqlite", dbPath)
-	require.NoError(t, err)
-	require.NoError(t, db.Ping())
-
-	return testqueries.New(db)
 }

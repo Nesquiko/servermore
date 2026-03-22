@@ -169,15 +169,27 @@ func CreateHTTPLogger(opts MonitoringOpts) func(http.Handler) http.Handler {
 func InstrumentedGrpcServer(opts MonitoringOpts) *grpc.Server {
 	return grpc.NewServer(
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
-		grpc.ChainUnaryInterceptor(grpcServerLogger(opts)),
+		grpc.ChainUnaryInterceptor(
+			WithDownloadMetaHolder,
+			WithInstanceStartMetaHolder,
+			grpcServerLogger(opts),
+		),
 	)
 }
 
-func InstrumentedGrpcClient(addr string, opts MonitoringOpts) (conn *grpc.ClientConn, err error) {
+func LoggingGrpcClient(addr string, opts MonitoringOpts) (conn *grpc.ClientConn, err error) {
 	return grpc.NewClient(
 		addr,
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		grpc.WithChainUnaryInterceptor(grpcClientLogger(opts)),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+}
+
+func GrpcClient(addr string) (conn *grpc.ClientConn, err error) {
+	return grpc.NewClient(
+		addr,
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 }
@@ -198,6 +210,41 @@ func grpcLogger(opts MonitoringOpts) (logging.LoggerFunc, []logging.Option) {
 	grpcLoggingOpts := []logging.Option{
 		logging.WithLogOnEvents(logging.FinishCall),
 		logging.WithDurationField(logging.DurationToDurationField),
+		logging.WithFieldsFromContext(func(ctx context.Context) logging.Fields {
+			fields := logging.Fields{}
+
+			downloadMeta := GetDownloadMeta(ctx)
+			if downloadMeta != nil {
+				fields = append(fields,
+					"download.function_id", downloadMeta.FunctionID,
+					"download.downloaded", downloadMeta.Downloaded,
+					"download.download_path", downloadMeta.DownloadPath,
+					"download.stored_path", downloadMeta.StoredPath,
+					"download.bytes_written", downloadMeta.BytesWritten,
+					"download.took", downloadMeta.DownloadTook,
+					"download.reused_from_fs", downloadMeta.ReusedFromFS,
+					"download.reused_inflight", downloadMeta.ReusedInFlight,
+				)
+			}
+
+			instanceStartMeta := GetInstanceStartMeta(ctx)
+			if instanceStartMeta != nil {
+				fields = append(fields,
+					"instance_start.function_path", instanceStartMeta.FunctionPath,
+					"instance_start.instance_id", instanceStartMeta.InstanceID,
+					"instance_start.runtime_type", instanceStartMeta.RuntimeType,
+					"instance_start.instance_addr", instanceStartMeta.InstanceAddr,
+					"instance_start.start_took", instanceStartMeta.StartTook,
+					"instance_start.reused_assigned", instanceStartMeta.ReusedAssigned,
+				)
+			}
+
+			if len(fields) == 0 {
+				return nil
+			}
+
+			return fields
+		}),
 	}
 
 	// grpcInterceptorLogger adapts slog logger to interceptor logger.

@@ -79,6 +79,7 @@ func runHttpStub(ctx context.Context, stub *StubCommander) {
 	r := chi.NewMux()
 	r.Use(middleware.Heartbeat(server.HeartbeatEndpoint))
 	h := api.HandlerFromMux(stub, r)
+	h = server.WithAPIErrorHolder(h)
 	s := &http.Server{Handler: h, Addr: stub.HttpAddr()}
 
 	errCh := make(chan error, 1)
@@ -101,6 +102,18 @@ func runHttpStub(ctx context.Context, stub *StubCommander) {
 	case err := <-readyErrCh:
 		assert.NoError(err)
 	}
+}
+
+func (s *StubCommander) Host() string {
+	return s.host
+}
+
+func (s *StubCommander) GrpcPort() string {
+	return s.grpcPort
+}
+
+func (s *StubCommander) HttpPort() string {
+	return s.httpPort
 }
 
 func (s *StubCommander) GrpcAddr() string {
@@ -127,6 +140,17 @@ func (s *StubCommander) SymlinkFile(srcPath server.AbsolutePath, filename string
 	}
 	if err := os.Symlink(srcPath, dstPath); err != nil {
 		panic(fmt.Errorf("create stub commander function symlink: %w", err))
+	}
+}
+
+func (s *StubCommander) PathFor(filename string) server.AbsolutePath {
+	return filepath.Join(s.storageRoot, filename)
+}
+
+func (s *StubCommander) DeleteFile(filename string) {
+	path := s.PathFor(filename)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		panic(fmt.Errorf("delete stub commander file: %w", err))
 	}
 }
 
@@ -160,7 +184,7 @@ func (s *StubCommander) CreateFunction(w http.ResponseWriter, r *http.Request) {
 // DownloadFunctionBinary implements [api.ServerInterface].
 func (s *StubCommander) DownloadFunctionBinary(w http.ResponseWriter, r *http.Request, id int64) {
 	funcId := chi.URLParam(r, "id")
-	filename := fmt.Sprintf("%d.bin", funcId)
+	filename := fmt.Sprintf("%s.bin", funcId)
 
 	if err, ok := s.errorOnPaths[filename]; ok {
 		server.InternalServerError(w, r, err)
