@@ -37,7 +37,7 @@ func TestMain(m *testing.M) {
 		Env:                   "TEST",
 		AppName:               "testing-runner",
 		Addr:                  ServerUrl,
-		CommanderAddress:      StubCommander.Addr(),
+		CommanderAddress:      StubCommander.GrpcAddr(),
 		InstanceShutdownAfter: 1 * time.Second,
 		FuncStorageRoot:       TestRunnerStorageRoot,
 	}

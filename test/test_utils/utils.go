@@ -50,13 +50,13 @@ func RandomFreePort() (string, error) {
 
 // WaitForHttpReady calls the specified endpoint until it gets a 200
 // response or until the context is cancelled or the timeout is reached.
-func WaitForHttpReady(ctx context.Context, serverLabel string, fullEntpointPath string) error {
+func WaitForHttpReady(ctx context.Context, serverLabel string, fullEndpointPath string) error {
 	return WaitForHttpReadyWithTiming(
 		ctx,
 		serverLabel,
 		1*time.Second,
 		100*time.Millisecond,
-		fullEntpointPath,
+		fullEndpointPath,
 	)
 }
 
@@ -65,12 +65,12 @@ func WaitForHttpReadyWithTiming(
 	serverLabel string,
 	timeout time.Duration,
 	interval time.Duration,
-	fullEntpointPath string,
+	fullEndpointPath string,
 ) error {
 	client := http.Client{}
 	startTime := time.Now()
 	for {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullEntpointPath, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullEndpointPath, nil)
 		if err != nil {
 			return fmt.Errorf("failed to create http request: %w", err)
 		}
@@ -101,7 +101,10 @@ func WaitForHttpReadyWithTiming(
 			return ctx.Err()
 		default:
 			if time.Since(startTime) >= timeout {
-				return fmt.Errorf("timeout reached while waiting for http endpoint")
+				return fmt.Errorf(
+					"timeout reached while waiting for http endpoint %q",
+					fullEndpointPath,
+				)
 			}
 			time.Sleep(interval)
 		}

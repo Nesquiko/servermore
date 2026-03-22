@@ -28,6 +28,7 @@ type CommanderDB interface {
 		name string,
 		hash []byte,
 	) (queries.Function, error)
+	FunctionByID(ctx context.Context, id int64) (queries.Function, error)
 	FunctionExistsByHash(ctx context.Context, hash []byte) (bool, error)
 }
 
@@ -92,6 +93,18 @@ func (s *SQLiteCommanderDB) CreateFunction(
 	})
 	if err != nil {
 		return queries.Function{}, fmt.Errorf("failed to create function: %w", err)
+	}
+
+	return f, nil
+}
+
+// FunctionByID implements [CommanderDB].
+func (s *SQLiteCommanderDB) FunctionByID(ctx context.Context, id int64) (queries.Function, error) {
+	f, err := withRetry(ctx, func(ctx context.Context) (queries.Function, error) {
+		return s.queries.FunctionByID(ctx, id)
+	})
+	if err != nil {
+		return queries.Function{}, fmt.Errorf("failed to get function by id: %w", err)
 	}
 
 	return f, nil

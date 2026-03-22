@@ -14,14 +14,14 @@ type AbsolutePath = string
 
 func CreateFile(filePath AbsolutePath, bytes []byte) error {
 	if err := os.WriteFile(filePath, bytes, 0o755); err != nil {
-		deleteFile(filePath)
+		DeleteFile(filePath)
 		return err
 	}
 
 	return nil
 }
 
-func deleteFile(fPath AbsolutePath) {
+func DeleteFile(fPath AbsolutePath) {
 	if err := os.Remove(fPath); err != nil {
 		slog.Error(
 			"there was an error deleting file",

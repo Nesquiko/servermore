@@ -39,6 +39,50 @@ paths:
         '500':
           $ref: './common.yaml#/components/responses/ErrorDetailResponse'
 
+  /functions/{id}/binary:
+    get:
+      operationId: downloadFunctionBinary
+      summary: Download a function binary
+      description: Streams the uploaded function binary and returns function metadata in response headers.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Unique function identifier.
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Function binary streamed successfully.
+          headers:
+            Function-Id:
+              description: Unique function identifier.
+              schema:
+                type: integer
+                format: int64
+            Function-Name:
+              description: Human readable function name.
+              schema:
+                type: string
+            Function-Filename:
+              description: Function binary filename.
+              schema:
+                type: string
+            Function-Path:
+              description: Original function binary path in commander storage.
+              schema:
+                type: string
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          $ref: './common.yaml#/components/responses/ErrorDetailResponse'
+        '500':
+          $ref: './common.yaml#/components/responses/ErrorDetailResponse'
+
 components:
   schemas:
     Function:

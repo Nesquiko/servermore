@@ -5,9 +5,18 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
 
 	api "github.com/Nesquiko/servermore/pkg/api/commander"
 	"github.com/Nesquiko/servermore/pkg/server"
+)
+
+const (
+	DownloadHeaderFunctionID       = "Function-Id"
+	DownloadHeaderFunctionFilename = "Function-Filename"
+	DownloadHeaderFunctionPath     = "Function-Path"
 )
 
 type CommanderHTTPServerConfig struct {
@@ -89,6 +98,46 @@ func (c *CommanderHTTPServer) CreateFunction(w http.ResponseWriter, r *http.Requ
 	}
 
 	server.EncodeResponse(w, r, http.StatusCreated, newFunc)
+}
+
+// DownloadFunctionBinary implements [api.ServerInterface].
+func (c *CommanderHTTPServer) DownloadFunctionBinary(
+	w http.ResponseWriter,
+	r *http.Request,
+	id int64,
+) {
+	function, err := c.service.FunctionByID(r.Context(), id)
+	if errors.Is(err, ErrFunctionNotFound) {
+		server.EncodeError(w, r, server.Error{
+			Cause:  err,
+			Code:   "function.not.found",
+			Detail: fmt.Sprintf("Function with id '%d' not found", id),
+			Status: http.StatusNotFound,
+			Title:  "Function not found",
+		})
+		return
+	} else if err != nil {
+		server.InternalServerError(w, r, err)
+		return
+	}
+
+	file, err := os.Open(function.Path)
+	if err != nil {
+		server.InternalServerError(w, r, fmt.Errorf("open function binary: %w", err))
+		return
+	}
+	defer file.Close()
+
+	w.Header().Set(DownloadHeaderFunctionID, strconv.FormatInt(function.ID, 10))
+	w.Header().Set(DownloadHeaderFunctionFilename, filepath.Base(function.Path))
+	w.Header().Set(DownloadHeaderFunctionPath, function.Path)
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.WriteHeader(http.StatusOK)
+
+	if _, err := io.Copy(w, file); err != nil {
+		server.InternalServerError(w, r, fmt.Errorf("stream function binary: %w", err))
+		return
+	}
 }
 
 func parseCreateFunctionMultipartRequest(r *http.Request) (string, io.ReadCloser, error) {

@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/oapi-codegen/oapi-codegen/v2.6.0/configuration-schema.json
+package: commanderclient
+output: ./pkg/api/commander-client/api.gen.go
+generate:
+  client: true
+import-mapping:
+  ./common.yaml: "github.com/Nesquiko/servermore/pkg/api/common"
+

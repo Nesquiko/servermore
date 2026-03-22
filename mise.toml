@@ -42,8 +42,9 @@ run = [
 [tasks.openapi-generate]
 description = "Generates code from openapi specs in ./api/"
 run = [
+	'oapi-codegen --config ./pkg/api/common-api-codegen.yaml ./api/common.yaml',
 	'oapi-codegen --config ./pkg/api/commander-api-codegen.yaml ./api/commander-openapi.yaml',
-	'oapi-codegen --config ./pkg/api/common-api-codegen.yaml ./api/common.yaml'
+	'oapi-codegen --config ./pkg/api/commander-api-client-codegen.yaml ./api/commander-openapi.yaml',
 ]
 
 [tasks.grpc-generate]

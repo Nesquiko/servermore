@@ -2,11 +2,13 @@ package commander
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
 
 	api "github.com/Nesquiko/servermore/pkg/api/commander"
+	queries "github.com/Nesquiko/servermore/pkg/commander/queries.gen"
 )
 
 type CommanderService struct {
@@ -14,7 +16,10 @@ type CommanderService struct {
 	funcStorage *FileSystemFunctionStorage
 }
 
-var ErrFunctionExists = errors.New("function with same hash already exists")
+var (
+	ErrFunctionExists   = errors.New("function with same hash already exists")
+	ErrFunctionNotFound = errors.New("function not found")
+)
 
 func NewCommanderService(db CommanderDB, funcStorage *FileSystemFunctionStorage) *CommanderService {
 	return &CommanderService{db: db, funcStorage: funcStorage}
@@ -53,4 +58,16 @@ func (svc *CommanderService) CreateFunction(
 	}
 
 	return api.Function{Id: newFunc.ID, Name: newFunc.Name}, nil
+}
+
+func (svc *CommanderService) FunctionByID(ctx context.Context, id int64) (queries.Function, error) {
+	function, err := svc.db.FunctionByID(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return queries.Function{}, ErrFunctionNotFound
+	}
+	if err != nil {
+		return queries.Function{}, fmt.Errorf("querying function by id failed: %w", err)
+	}
+
+	return function, nil
 }

@@ -16,16 +16,6 @@ message RegisterRunnerResponse {
   int64 runner_id = 1;
 }
 
-message DownloadFunctionRequest {
-  int64 function_id = 1;
-}
-
-message DownloadFunctionResponse {
-  string function_path = 1;
-  string function_filename = 2;
-  bytes file_bytes = 3;
-}
-
 message RouteFunctionRequest {
   int64 function_id = 1;
 }
@@ -39,8 +29,6 @@ service Commander {
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse) {}
 
   rpc RegisterRunner(RegisterRunnerRequest) returns (RegisterRunnerResponse) {}
-
-  rpc DownloadFunction(DownloadFunctionRequest) returns (DownloadFunctionResponse) {}
 
   rpc RouteFunction(RouteFunctionRequest) returns (RouteFunctionResponse) {}
 }

@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
+	commanderclient "github.com/Nesquiko/servermore/pkg/api/commander-client"
 	"github.com/Nesquiko/servermore/pkg/commander"
 	"github.com/Nesquiko/servermore/pkg/guest"
 	"github.com/Nesquiko/servermore/pkg/server"
@@ -19,8 +22,9 @@ import (
 type runnerGrpcServer struct {
 	UnimplementedRunnerServer
 
-	runnerId        int64
-	commanderClient commander.CommanderClient
+	runnerId            int64
+	commanderGrpcClient commander.CommanderClient
+	commanderHttpClient *commanderclient.Client
 
 	instances *InstancesStates
 	downloads *DownloadsSyncMap
@@ -41,7 +45,16 @@ func newRunnerGrpcServer(
 ) (*runnerGrpcServer, func(), error) {
 	err := server.CreateDirIfNotExists(conf.FuncStorageRoot)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf(
+			"creating storage root %q failed: %w",
+			conf.FuncStorageRoot,
+			err,
+		)
+	}
+
+	httpClient, err := commanderclient.NewClient("http://" + conf.CommanderAddress)
+	if err != nil {
+		return nil, nil, fmt.Errorf("creating commander http client failed: %w", err)
 	}
 
 	conn, err := server.InstrumentedGrpcClient(conf.CommanderAddress, monitoringOpts)
@@ -70,7 +83,8 @@ func newRunnerGrpcServer(
 
 	return &runnerGrpcServer{
 		runnerId:              resp.RunnerId,
-		commanderClient:       client,
+		commanderGrpcClient:   client,
+		commanderHttpClient:   httpClient,
 		instances:             NewInstanceStates(),
 		downloads:             NewDownloadsSyncMap(),
 		instanceShutdownAfter: conf.InstanceShutdownAfter,
@@ -130,7 +144,7 @@ func (r *runnerGrpcServer) PrepareFunctionInstance(
 	r.downloads.Delete(funcFilePath)
 	resultConsumers.SubmitResult(DownloadResult{path: funcFilePath, err: err})
 	if err != nil {
-		return nil, fmt.Errorf("download errorred: %w", err)
+		return nil, fmt.Errorf("download errored: %w", err)
 	}
 
 	instanceId, err := r.startInstance(ctx, funcFilePath)
@@ -246,20 +260,46 @@ func (r *runnerGrpcServer) downloadFunction(
 	ctx context.Context,
 	functionId int64,
 ) (server.AbsolutePath, error) {
-	resp, err := r.commanderClient.DownloadFunction(
-		ctx,
-		&commander.DownloadFunctionRequest{FunctionId: functionId},
-	)
+	resp, err := r.commanderHttpClient.DownloadFunctionBinary(ctx, functionId)
 	if err != nil {
-		return "", fmt.Errorf("dowload function id '%d' failed: %w", functionId, err)
+		return "", fmt.Errorf("download function id '%d' failed: %w", functionId, err)
 	}
 
-	funcPath := filepath.Join(resp.FunctionPath, resp.FunctionFilename)
+	switch resp.StatusCode {
+	case http.StatusNotFound:
+		return "", fmt.Errorf("download failed, function with id '%d' wasn't found", functionId)
+	case http.StatusInternalServerError:
+		return "", fmt.Errorf("download failed, commander errored")
+	}
+
+	responseFuncPath := resp.Header.Get(commander.DownloadHeaderFunctionPath)
+	responseFuncName := resp.Header.Get(commander.DownloadHeaderFunctionFilename)
+
+	funcPath := filepath.Join(responseFuncPath, responseFuncName)
 	funcPath = r.pathOnRunner(funcPath)
 
-	err = server.CreateFile(funcPath, resp.FileBytes)
+	if err := os.MkdirAll(filepath.Dir(funcPath), 0o755); err != nil {
+		return "", fmt.Errorf(
+			"failed to create the dir %q path of downloaded function '%d': %w",
+			funcPath, functionId, err,
+		)
+	}
+
+	file, err := os.Create(funcPath)
 	if err != nil {
-		return "", fmt.Errorf("creating function file at %q failed: %w", funcPath, err)
+		return "", fmt.Errorf(
+			"failed to create the downloaded function file %q for function '%d': %w",
+			funcPath, functionId, err,
+		)
+	}
+	defer file.Close()
+
+	if _, err := io.Copy(file, resp.Body); err != nil {
+		server.DeleteFile(funcPath)
+		return "", fmt.Errorf(
+			"failed copy bytes of downloaded function file %q for function '%d': %w",
+			funcPath, functionId, err,
+		)
 	}
 
 	return funcPath, nil
