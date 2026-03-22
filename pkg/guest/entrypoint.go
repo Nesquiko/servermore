@@ -100,6 +100,8 @@ func (g *guestServer) Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatR
 	return &HeartbeatResponse{}, nil
 }
 
+const NilResponseErrorMsg = "response was nil"
+
 // InvokeFunction implements [GuestServer].
 func (g *guestServer) InvokeFunction(
 	ctx context.Context,
@@ -113,7 +115,7 @@ func (g *guestServer) InvokeFunction(
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	} else if resp == nil {
-		return nil, status.Error(codes.Internal, "response can't be empty")
+		return nil, status.Error(codes.Internal, NilResponseErrorMsg)
 	}
 	return resp, nil
 }

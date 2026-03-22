@@ -13,6 +13,7 @@ import (
 	"time"
 
 	commanderclient "github.com/Nesquiko/servermore/pkg/api/commander-client"
+	"github.com/Nesquiko/servermore/pkg/assert"
 	"github.com/Nesquiko/servermore/pkg/commander"
 	"github.com/Nesquiko/servermore/pkg/guest"
 	"github.com/Nesquiko/servermore/pkg/server"
@@ -186,10 +187,19 @@ func (r *runnerGrpcServer) startInstance(
 
 	isAssigned, idConsumers, idCh := r.instances.IsAssignedOrStartIt(funcFilePath)
 	if isAssigned {
-		assignedID := <-idCh
-		meta.InstanceID = assignedID.String()
+		idResult := <-idCh
+		if idResult.err != nil {
+			return uuid.Nil, fmt.Errorf(
+				"starting instance for %q errored: %w",
+				funcFilePath,
+				idResult.err,
+			)
+		}
+		assert.That(idResult.instanceId != uuid.Nil, "instance id was nil")
+
+		meta.InstanceID = idResult.instanceId.String()
 		meta.ReusedAssigned = true
-		return assignedID, nil
+		return idResult.instanceId, nil
 	}
 
 	funcRuntime := DetermineFuncRuntime()
@@ -197,12 +207,14 @@ func (r *runnerGrpcServer) startInstance(
 
 	err = funcRuntime.Start(ctx, funcFilePath)
 	if err != nil {
+		r.instances.RemoveStartingInstance(funcFilePath)
+		idConsumers.SubmitResult(StartInstanceResult{err: err})
 		return uuid.Nil, fmt.Errorf("failed to start the instance: %w", err)
 	}
 	instance := r.instances.Submit(funcFilePath, instanceId, r.instanceShutdownAfter, funcRuntime)
 	go r.shutdownAfterTime(instance)
 
-	idConsumers.SubmitResult(instanceId)
+	idConsumers.SubmitResult(StartInstanceResult{instanceId: instanceId})
 
 	return instanceId, nil
 }
@@ -217,8 +229,19 @@ func (r *runnerGrpcServer) InvokeFunctionInstance(
 	ctx context.Context,
 	req *InvokeInstanceRequest,
 ) (*InvokeInstanceResponse, error) {
+	startTime := time.Now()
+	meta := &server.InvokeMeta{
+		InstanceID:       req.InstanceId,
+		Method:           req.Method,
+		Path:             req.Path,
+		RequestBodyBytes: len(req.Body),
+		HeadersCount:     len(req.Headers),
+	}
+	server.SetInvokeMeta(ctx, meta)
+
 	instanceId, err := uuid.Parse(req.InstanceId)
 	if err != nil {
+		meta.InvocationTook = time.Since(startTime)
 		return nil, fmt.Errorf("invalid uuid instanceId: %w", err)
 	}
 
@@ -231,9 +254,13 @@ func (r *runnerGrpcServer) InvokeFunctionInstance(
 
 	isRunning, instance, err := r.instances.InstanceState(instanceId)
 	if err != nil {
+		meta.InvocationTook = time.Since(startTime)
 		return nil, fmt.Errorf("invoking instance %q failed: %w", req.InstanceId, err)
 	}
+	meta.WorkerAlreadyRunning = isRunning
+	meta.StartedWorker = !isRunning
 	respCh := instance.AddToQueue(invocationReq)
+	meta.QueueDepthAtEnqueue = len(instance.queue)
 
 	if !isRunning {
 		go r.instanceWorker(instance)
@@ -241,8 +268,17 @@ func (r *runnerGrpcServer) InvokeFunctionInstance(
 
 	select {
 	case <-ctx.Done():
+		meta.InvocationTook = time.Since(startTime)
 		return nil, ctx.Err()
 	case result := <-respCh:
+		meta.InvocationTook = time.Since(startTime)
+		if result.err != nil {
+			return result.resp, result.err
+		}
+		if result.resp != nil {
+			meta.ResponseStatusCode = result.resp.StatusCode
+			meta.ResponseBodyBytes = len(result.resp.Body)
+		}
 		return result.resp, result.err
 	}
 }

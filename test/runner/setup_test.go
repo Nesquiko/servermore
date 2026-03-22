@@ -16,9 +16,10 @@ import (
 )
 
 var (
-	ServerUrl             string
-	TestRunnerStorageRoot string
-	StubCommander         *testutils.StubCommander
+	ServerUrl                 string
+	TestRunnerStorageRoot     string
+	StubCommander             *testutils.StubCommander
+	TestInstanceShutdownAfter time.Duration = 1 * time.Second
 )
 
 func TestMain(m *testing.M) {
@@ -42,7 +43,7 @@ func TestMain(m *testing.M) {
 		CommanderHost:         StubCommander.Host(),
 		CommanderGrpcPort:     StubCommander.GrpcPort(),
 		CommanderHttpPort:     StubCommander.HttpPort(),
-		InstanceShutdownAfter: 1 * time.Second,
+		InstanceShutdownAfter: TestInstanceShutdownAfter,
 		FuncStorageRoot:       TestRunnerStorageRoot,
 	}
 

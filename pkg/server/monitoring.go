@@ -172,6 +172,7 @@ func InstrumentedGrpcServer(opts MonitoringOpts) *grpc.Server {
 		grpc.ChainUnaryInterceptor(
 			WithDownloadMetaHolder,
 			WithInstanceStartMetaHolder,
+			WithInvokeMetaHolder,
 			grpcServerLogger(opts),
 		),
 	)
@@ -236,6 +237,23 @@ func grpcLogger(opts MonitoringOpts) (logging.LoggerFunc, []logging.Option) {
 					"instance_start.instance_addr", instanceStartMeta.InstanceAddr,
 					"instance_start.start_took", instanceStartMeta.StartTook,
 					"instance_start.reused_assigned", instanceStartMeta.ReusedAssigned,
+				)
+			}
+
+			invokeMeta := GetInvokeMeta(ctx)
+			if invokeMeta != nil {
+				fields = append(fields,
+					"invoke.instance_id", invokeMeta.InstanceID,
+					"invoke.method", invokeMeta.Method,
+					"invoke.path", invokeMeta.Path,
+					"invoke.request_body_bytes", invokeMeta.RequestBodyBytes,
+					"invoke.headers_count", invokeMeta.HeadersCount,
+					"invoke.worker_already_running", invokeMeta.WorkerAlreadyRunning,
+					"invoke.started_worker", invokeMeta.StartedWorker,
+					"invoke.queue_depth_at_enqueue", invokeMeta.QueueDepthAtEnqueue,
+					"invoke.took", invokeMeta.InvocationTook,
+					"invoke.response_status_code", invokeMeta.ResponseStatusCode,
+					"invoke.response_body_bytes", invokeMeta.ResponseBodyBytes,
 				)
 			}
 

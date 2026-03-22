@@ -5,31 +5,26 @@ import (
 	"errors"
 
 	"github.com/Nesquiko/servermore/pkg/guest"
-)
-
-const (
-	PathOK    = "/ok"
-	PathNil   = "/nil"
-	PathError = "/error"
+	testingguestconsts "github.com/Nesquiko/servermore/test/testing-guest/consts"
 )
 
 func handler(ctx context.Context, req *guest.InvocationRequest) (*guest.InvocationResponse, error) {
 	switch req.GetPath() {
-	case PathOK:
+	case testingguestconsts.PathOK:
 		return &guest.InvocationResponse{
 			StatusCode: 200,
-			Headers:    map[string]string{"content-type": "application/json"},
-			Body:       []byte(`{"status":"ok"}`),
+			Headers:    map[string]string{"content-type": testingguestconsts.HeaderJSON},
+			Body:       []byte(testingguestconsts.BodyOK),
 		}, nil
-	case PathNil:
+	case testingguestconsts.PathNil:
 		return nil, nil
-	case PathError:
-		return nil, errors.New("testing guest error")
+	case testingguestconsts.PathError:
+		return nil, errors.New(testingguestconsts.ErrorMessage)
 	default:
 		return &guest.InvocationResponse{
 			StatusCode: 404,
-			Headers:    map[string]string{"content-type": "application/json"},
-			Body:       []byte(`{"error":"not found"}`),
+			Headers:    map[string]string{"content-type": testingguestconsts.HeaderJSON},
+			Body:       []byte(testingguestconsts.BodyNotFound),
 		}, nil
 	}
 }

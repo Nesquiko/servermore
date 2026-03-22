@@ -2,7 +2,7 @@ package runner
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -17,6 +17,11 @@ const (
 	InvocationsQueueMaxLen = 100
 )
 
+type StartInstanceResult struct {
+	instanceId uuid.UUID
+	err        error
+}
+
 // when starting instance:
 // - is there already an instance associated with funcPath
 //   - if yes return it the channel with the UUID
@@ -26,7 +31,7 @@ type InstancesStates struct {
 	funcPathToId   map[server.AbsolutePath]uuid.UUID
 	funcPathToIdMu sync.RWMutex
 
-	startingInstances map[server.AbsolutePath]*MultiConsumer[uuid.UUID]
+	startingInstances map[server.AbsolutePath]*MultiConsumer[StartInstanceResult]
 	startingMu        sync.Mutex
 
 	instanceStates   map[uuid.UUID]*instanceState
@@ -85,7 +90,7 @@ func NewInstanceStates() *InstancesStates {
 	return &InstancesStates{
 		funcPathToId:      map[server.AbsolutePath]uuid.UUID{},
 		funcPathToIdMu:    sync.RWMutex{},
-		startingInstances: map[server.AbsolutePath]*MultiConsumer[uuid.UUID]{},
+		startingInstances: map[server.AbsolutePath]*MultiConsumer[StartInstanceResult]{},
 		startingMu:        sync.Mutex{},
 		instanceStates:    map[uuid.UUID]*instanceState{},
 		instanceStatesMu:  sync.RWMutex{},
@@ -100,45 +105,49 @@ func NewInstanceStates() *InstancesStates {
 //  1. start the instance
 //  2. submits it id to InstancesStates (using [AssignId])
 //  3. answers subscribers by submitting the result to the returned MultiConsumer
-func (m *InstancesStates) IsAssignedOrStartIt(
+func (is *InstancesStates) IsAssignedOrStartIt(
 	funcPath server.AbsolutePath,
-) (bool, *MultiConsumer[uuid.UUID], <-chan uuid.UUID) {
-	m.funcPathToIdMu.RLock()
-	if instanceId, ok := m.funcPathToId[funcPath]; ok {
-		resCh := make(chan uuid.UUID, 1)
-		resCh <- instanceId
-		m.funcPathToIdMu.RUnlock()
+) (bool, *MultiConsumer[StartInstanceResult], <-chan StartInstanceResult) {
+	is.funcPathToIdMu.RLock()
+	if instanceId, ok := is.funcPathToId[funcPath]; ok {
+		resCh := make(chan StartInstanceResult, 1)
+		resCh <- StartInstanceResult{instanceId: instanceId}
+		is.funcPathToIdMu.RUnlock()
 		return true, nil, resCh
 	}
-	m.funcPathToIdMu.RUnlock()
+	is.funcPathToIdMu.RUnlock()
 
-	m.startingMu.Lock()
-	defer m.startingMu.Unlock()
-	if consumer, ok := m.startingInstances[funcPath]; ok {
+	is.startingMu.Lock()
+	defer is.startingMu.Unlock()
+	if consumer, ok := is.startingInstances[funcPath]; ok {
 		return true, nil, consumer.AddSub()
 	}
 
-	resultConsumers := NewMultiConsumer[uuid.UUID]()
-	m.startingInstances[funcPath] = resultConsumers
+	resultConsumers := NewMultiConsumer[StartInstanceResult]()
+	is.startingInstances[funcPath] = resultConsumers
 	return false, resultConsumers, nil
 }
 
-func (m *InstancesStates) Submit(
+func (is *InstancesStates) RemoveStartingInstance(funcPath server.AbsolutePath) {
+	is.startingMu.Lock()
+	delete(is.startingInstances, funcPath)
+	is.startingMu.Unlock()
+}
+
+func (is *InstancesStates) Submit(
 	funcPath server.AbsolutePath,
 	instanceId uuid.UUID,
 	shutdownAfter time.Duration,
 	runtime FunctionRuntime,
 ) *instanceState {
-	m.funcPathToIdMu.Lock()
-	m.funcPathToId[funcPath] = instanceId
-	m.funcPathToIdMu.Unlock()
+	is.funcPathToIdMu.Lock()
+	is.funcPathToId[funcPath] = instanceId
+	is.funcPathToIdMu.Unlock()
 
-	m.startingMu.Lock()
-	delete(m.startingInstances, funcPath)
-	m.startingMu.Unlock()
+	is.RemoveStartingInstance(funcPath)
 
 	workerCtx, workerCancelCtx := context.WithCancel(context.Background())
-	m.instanceStatesMu.Lock()
+	is.instanceStatesMu.Lock()
 	state := instanceState{
 		id:                    instanceId,
 		funcPath:              funcPath,
@@ -150,20 +159,22 @@ func (m *InstancesStates) Submit(
 		workerCtx:             workerCtx,
 		workerCancel:          workerCancelCtx,
 	}
-	m.instanceStates[instanceId] = &state
-	m.instanceStatesMu.Unlock()
+	is.instanceStates[instanceId] = &state
+	is.instanceStatesMu.Unlock()
 	return &state
 }
 
 // QueueDepths reads the lengths of queues WITHOUGH LOCKING to not slowdown
 // the request processing, it is OK that it returns not precise data
-func (m *InstancesStates) QueueDepths() map[string]uint32 {
+func (is *InstancesStates) QueueDepths() map[string]uint32 {
 	depths := make(map[string]uint32)
-	for k, v := range m.instanceStates {
+	for k, v := range is.instanceStates {
 		depths[k.String()] = uint32(len(v.queue))
 	}
 	return depths
 }
+
+var UnknownInstanceErr = errors.New("unknown instance id")
 
 // Invoke returns boolean indicating if instance is running, or error, caller
 // must handle different cases:
@@ -171,20 +182,20 @@ func (m *InstancesStates) QueueDepths() map[string]uint32 {
 //   - running == false => then the caller must become a "worker" and must use returned
 //     instance state to send all requests in queue to the instance
 //   - running == true => caller cann add request to the queue and will receive the response from the channel
-func (m *InstancesStates) InstanceState(instanceId uuid.UUID) (bool, *instanceState, error) {
-	m.instanceStatesMu.RLock()
-	instance, ok := m.instanceStates[instanceId]
-	m.instanceStatesMu.RUnlock()
+func (is *InstancesStates) InstanceState(instanceId uuid.UUID) (bool, *instanceState, error) {
+	is.instanceStatesMu.RLock()
+	instance, ok := is.instanceStates[instanceId]
+	is.instanceStatesMu.RUnlock()
 
 	if !ok {
-		return false, nil, fmt.Errorf("instance didn't start")
+		return false, nil, UnknownInstanceErr
 	}
 
 	if instance.opened.CompareAndSwap(false, true) {
 		return false, instance, nil
 	}
 
-	return true, nil, nil
+	return true, instance, nil
 }
 
 func (is *InstancesStates) StopInstance(instance *instanceState) {
@@ -251,6 +262,9 @@ func (m *DownloadsSyncMap) Delete(path server.AbsolutePath) {
 type MultiConsumer[T any] struct {
 	subscribers []chan<- T
 	mu          sync.Mutex
+
+	hasResult bool
+	result    T
 }
 
 func NewMultiConsumer[T any]() *MultiConsumer[T] {
@@ -260,13 +274,20 @@ func NewMultiConsumer[T any]() *MultiConsumer[T] {
 func (b *MultiConsumer[T]) AddSub() <-chan T {
 	newSub := make(chan T, 1)
 	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.hasResult {
+		newSub <- b.result
+		close(newSub)
+		return newSub
+	}
 	b.subscribers = append(b.subscribers, newSub)
-	b.mu.Unlock()
 	return newSub
 }
 
 func (b *MultiConsumer[T]) SubmitResult(result T) {
 	b.mu.Lock()
+	b.hasResult = true
+	b.result = result
 	for _, sub := range b.subscribers {
 		sub <- result
 		close(sub)

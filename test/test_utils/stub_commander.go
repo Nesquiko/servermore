@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 
 	api "github.com/Nesquiko/servermore/pkg/api/commander"
@@ -30,7 +31,8 @@ type StubCommander struct {
 	runnerID   atomic.Int64
 	grpcServer *grpc.Server
 
-	errorOnPaths map[server.AbsolutePath]error
+	errorOnPaths   map[server.AbsolutePath]error
+	errorOnPathsMu sync.RWMutex
 }
 
 func RunStubCommander(ctx context.Context) *StubCommander {
@@ -47,11 +49,12 @@ func runGrpcStub(ctx context.Context) *StubCommander {
 	assert.NoError(err)
 
 	stub := &StubCommander{
-		storageRoot:  tmpDir,
-		host:         "127.0.0.1",
-		grpcPort:     port,
-		grpcServer:   grpc.NewServer(),
-		errorOnPaths: map[server.AbsolutePath]error{},
+		storageRoot:    tmpDir,
+		host:           "127.0.0.1",
+		grpcPort:       port,
+		grpcServer:     grpc.NewServer(),
+		errorOnPaths:   map[server.AbsolutePath]error{},
+		errorOnPathsMu: sync.RWMutex{},
 	}
 	stub.runnerID.Store(0)
 
@@ -130,7 +133,9 @@ func (s *StubCommander) Close() {
 }
 
 func (s *StubCommander) MarkPathToError(funcPath server.AbsolutePath, err error) {
+	s.errorOnPathsMu.Lock()
 	s.errorOnPaths[funcPath] = err
+	s.errorOnPathsMu.Unlock()
 }
 
 func (s *StubCommander) SymlinkFile(srcPath server.AbsolutePath, filename string) {
@@ -186,10 +191,13 @@ func (s *StubCommander) DownloadFunctionBinary(w http.ResponseWriter, r *http.Re
 	funcId := chi.URLParam(r, "id")
 	filename := fmt.Sprintf("%s.bin", funcId)
 
+	s.errorOnPathsMu.RLock()
 	if err, ok := s.errorOnPaths[filename]; ok {
 		server.InternalServerError(w, r, err)
+		s.errorOnPathsMu.RUnlock()
 		return
 	}
+	s.errorOnPathsMu.RUnlock()
 
 	path := filepath.Join(s.storageRoot, filename)
 	file, err := os.Open(path)
