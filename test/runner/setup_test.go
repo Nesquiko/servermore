@@ -19,7 +19,7 @@ var (
 	ServerUrl                 string
 	TestRunnerStorageRoot     string
 	StubCommander             *testutils.StubCommander
-	TestInstanceShutdownAfter time.Duration = 1 * time.Second
+	TestInstanceShutdownAfter time.Duration = 2 * time.Second
 )
 
 func TestMain(m *testing.M) {

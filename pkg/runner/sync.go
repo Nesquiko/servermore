@@ -28,9 +28,6 @@ type StartInstanceResult struct {
 //   - if starting return the channel
 //   - if no return MultiConsumer
 type InstancesStates struct {
-	funcPathToId   map[server.AbsolutePath]uuid.UUID
-	funcPathToIdMu sync.RWMutex
-
 	startingInstances map[server.AbsolutePath]*MultiConsumer[StartInstanceResult]
 	startingMu        sync.Mutex
 
@@ -88,8 +85,6 @@ type InvocationResult struct {
 
 func NewInstanceStates() *InstancesStates {
 	return &InstancesStates{
-		funcPathToId:      map[server.AbsolutePath]uuid.UUID{},
-		funcPathToIdMu:    sync.RWMutex{},
 		startingInstances: map[server.AbsolutePath]*MultiConsumer[StartInstanceResult]{},
 		startingMu:        sync.Mutex{},
 		instanceStates:    map[uuid.UUID]*instanceState{},
@@ -97,7 +92,7 @@ func NewInstanceStates() *InstancesStates {
 	}
 }
 
-// IsAssignedOrStartIt checks if the given funcPath has a running instance,
+// IsStartingOrStartIt checks if the given funcPath has a running instance,
 // if yes, returns its id in channel. If it is only starting, returns the channel
 // through which the instance id will be returned.
 // If no, it is the callers responsibility to start the instance and submit its
@@ -105,18 +100,9 @@ func NewInstanceStates() *InstancesStates {
 //  1. start the instance
 //  2. submits it id to InstancesStates (using [AssignId])
 //  3. answers subscribers by submitting the result to the returned MultiConsumer
-func (is *InstancesStates) IsAssignedOrStartIt(
+func (is *InstancesStates) IsStartingOrStartIt(
 	funcPath server.AbsolutePath,
 ) (bool, *MultiConsumer[StartInstanceResult], <-chan StartInstanceResult) {
-	is.funcPathToIdMu.RLock()
-	if instanceId, ok := is.funcPathToId[funcPath]; ok {
-		resCh := make(chan StartInstanceResult, 1)
-		resCh <- StartInstanceResult{instanceId: instanceId}
-		is.funcPathToIdMu.RUnlock()
-		return true, nil, resCh
-	}
-	is.funcPathToIdMu.RUnlock()
-
 	is.startingMu.Lock()
 	defer is.startingMu.Unlock()
 	if consumer, ok := is.startingInstances[funcPath]; ok {
@@ -140,10 +126,6 @@ func (is *InstancesStates) Submit(
 	shutdownAfter time.Duration,
 	runtime FunctionRuntime,
 ) *instanceState {
-	is.funcPathToIdMu.Lock()
-	is.funcPathToId[funcPath] = instanceId
-	is.funcPathToIdMu.Unlock()
-
 	is.RemoveStartingInstance(funcPath)
 
 	workerCtx, workerCancelCtx := context.WithCancel(context.Background())
@@ -203,10 +185,6 @@ func (is *InstancesStates) StopInstance(instance *instanceState) {
 	instance.workerCancel()
 	close(instance.queue)
 	instance.lastUsedTimer.Stop()
-
-	is.funcPathToIdMu.Lock()
-	delete(is.funcPathToId, instance.funcPath)
-	is.funcPathToIdMu.Unlock()
 
 	is.instanceStatesMu.Lock()
 	delete(is.instanceStates, instance.id)

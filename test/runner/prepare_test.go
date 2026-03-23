@@ -30,11 +30,13 @@ func TestPrepareFunctionInstance_DownloadsBinaryToRunnerStorageRoot(t *testing.T
 
 	expectedRunnerPath := filepath.Join(TestRunnerStorageRoot, functionPath)
 	require.NoError(t, testutils.DeleteIfExists(expectedRunnerPath))
+	var firstInstanceID string
 
 	t.Run("downloads binary", func(t *testing.T) {
 		resp, err := prepareFunctionInstance(t, client, functionID, functionPath)
 		require.NoError(t, err)
 
+		firstInstanceID = resp.GetInstanceId()
 		assert.NotEmpty(t, resp.GetInstanceId())
 		assert.True(t, resp.GetDownloaded())
 		assert.FileExists(t, expectedRunnerPath)
@@ -51,6 +53,7 @@ func TestPrepareFunctionInstance_DownloadsBinaryToRunnerStorageRoot(t *testing.T
 		require.NoError(t, err)
 
 		assert.NotEmpty(t, resp.GetInstanceId())
+		assert.NotEqual(t, firstInstanceID, resp.GetInstanceId())
 		assert.False(t, resp.GetDownloaded())
 		assert.True(t, statsAfter.ModTime().Equal(statsBefore.ModTime()))
 	})

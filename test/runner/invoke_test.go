@@ -251,3 +251,49 @@ func TestInvokeFunctionInstance_AfterInstanceShutdownReturnsError(t *testing.T) 
 	assert.Nil(t, invokeResp)
 	assert.ErrorAs(t, err, &runner.UnknownInstanceErr)
 }
+
+func TestPrepareFunctionInstance_SequentialPreparesCreateDistinctInstances(t *testing.T) {
+	t.Parallel()
+
+	client := newRunnerClient(t)
+
+	const functionID int64 = 207
+	const functionFilename = "207.bin"
+
+	binaryPath, err := filepath.Abs(testutils.TestingBinaryPath)
+	require.NoError(t, err)
+
+	StubCommander.DeleteFile(functionFilename)
+	StubCommander.SymlinkFile(binaryPath, functionFilename)
+	functionPath := StubCommander.PathFor(functionFilename)
+
+	prepareResp1, err := prepareFunctionInstance(t, client, functionID, functionPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, prepareResp1.GetInstanceId())
+
+	prepareResp2, err := prepareFunctionInstance(t, client, functionID, functionPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, prepareResp2.GetInstanceId())
+
+	assert.NotEqual(t, prepareResp1.GetInstanceId(), prepareResp2.GetInstanceId())
+
+	invokeResp1, err := client.InvokeFunctionInstance(t.Context(), &runner.InvokeInstanceRequest{
+		InstanceId: prepareResp1.GetInstanceId(),
+		Method:     http.MethodGet,
+		Path:       testingguestconsts.PathOK,
+	})
+	require.NoError(t, err)
+	assert.EqualValues(t, 200, invokeResp1.GetStatusCode())
+	assert.Equal(t, testingguestconsts.HeaderJSON, invokeResp1.GetHeaders()["content-type"])
+	assert.Equal(t, []byte(testingguestconsts.BodyOK), invokeResp1.GetBody())
+
+	invokeResp2, err := client.InvokeFunctionInstance(t.Context(), &runner.InvokeInstanceRequest{
+		InstanceId: prepareResp2.GetInstanceId(),
+		Method:     http.MethodGet,
+		Path:       testingguestconsts.PathOK,
+	})
+	require.NoError(t, err)
+	assert.EqualValues(t, 200, invokeResp2.GetStatusCode())
+	assert.Equal(t, testingguestconsts.HeaderJSON, invokeResp2.GetHeaders()["content-type"])
+	assert.Equal(t, []byte(testingguestconsts.BodyOK), invokeResp2.GetBody())
+}

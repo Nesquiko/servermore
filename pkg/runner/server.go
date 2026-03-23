@@ -185,14 +185,13 @@ func (r *runnerGrpcServer) startInstance(
 	meta := &server.InstanceStartMeta{FunctionPath: funcFilePath, InstanceID: instanceId.String()}
 	server.SetInstanceStartMeta(ctx, meta)
 
-	isAssigned, idConsumers, idCh := r.instances.IsAssignedOrStartIt(funcFilePath)
-	if isAssigned {
+	isStarting, idConsumers, idCh := r.instances.IsStartingOrStartIt(funcFilePath)
+	if isStarting {
 		idResult := <-idCh
 		if idResult.err != nil {
 			return uuid.Nil, fmt.Errorf(
 				"starting instance for %q errored: %w",
-				funcFilePath,
-				idResult.err,
+				funcFilePath, idResult.err,
 			)
 		}
 		assert.That(idResult.instanceId != uuid.Nil, "instance id was nil")
