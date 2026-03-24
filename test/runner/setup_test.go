@@ -86,10 +86,10 @@ func newRunnerClient(t *testing.T) runner.RunnerClient {
 	t.Helper()
 
 	monitoringOpts := server.MonitoringOpts{
-		IsDev:      true,
-		AppName:    "runner-test-client",
-		AppVersion: "n/a",
-		Env:        "TEST",
+		Env:             "TEST",
+		AppName:         "runner-test-client",
+		AdditionalAttrs: map[string]string{"test.name": t.Name()},
+		Level:           slog.LevelDebug,
 	}
 
 	conn, err := server.LoggingGrpcClient(ServerUrl, monitoringOpts)

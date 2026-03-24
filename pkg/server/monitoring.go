@@ -15,22 +15,30 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
 type MonitoringOpts struct {
-	IsDev bool
-
-	AppName    string
-	AppVersion string
 	// Env value: PROD | TEST | LOCAL
 	Env string
+
+	AppName         string
+	AppVersion      string
+	AdditionalAttrs map[string]string
+
+	Level slog.Level
+}
+
+func (o MonitoringOpts) IsDev() bool {
+	return o.Env != "PROD"
 }
 
 func InitHttpOTEL(
@@ -96,17 +104,23 @@ func InitTracerProvider(
 	res *resource.Resource,
 	opts MonitoringOpts,
 ) (*sdktrace.TracerProvider, error) {
+	var exporter sdktrace.SpanExporter
+	var err error
+
+	if opts.IsDev() {
+		exporter, err = stdouttrace.New(stdouttrace.WithPrettyPrint())
+	} else {
+		exporter, err = otlptracegrpc.New(ctx)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize exporter: %w", err)
+	}
+
 	tracerOpts := []sdktrace.TracerProviderOption{
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 		sdktrace.WithResource(res),
-	}
-
-	if opts.IsDev {
-		exporter, err := otlptracegrpc.New(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize exporter: %w", err)
-		}
-		tracerOpts = append(tracerOpts, sdktrace.WithBatcher(exporter))
+		sdktrace.WithBatcher(exporter),
 	}
 
 	return sdktrace.NewTracerProvider(tracerOpts...), nil
@@ -121,7 +135,7 @@ func InitMeter(
 		sdkmetric.WithResource(res),
 	}
 
-	if opts.IsDev {
+	if !opts.IsDev() {
 		exporter, err := otlpmetricgrpc.New(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize exporter: %w", err)
@@ -137,9 +151,12 @@ func InitMeter(
 
 func CreateHTTPLogger(opts MonitoringOpts) func(http.Handler) http.Handler {
 	logSchema := httplog.SchemaOTEL
-	logFmt := logSchema.Concise(opts.IsDev)
+	logFmt := logSchema.Concise(opts.IsDev())
 
-	logger := slogLogger(opts, &slog.HandlerOptions{ReplaceAttr: logFmt.ReplaceAttr})
+	logger := slogLogger(
+		opts,
+		&slog.HandlerOptions{ReplaceAttr: logFmt.ReplaceAttr, Level: opts.Level},
+	)
 
 	return httplog.RequestLogger(logger, &httplog.Options{
 		Level:             slog.LevelInfo,
@@ -178,20 +195,23 @@ func InstrumentedGrpcServer(opts MonitoringOpts) *grpc.Server {
 	)
 }
 
-func LoggingGrpcClient(addr string, opts MonitoringOpts) (conn *grpc.ClientConn, err error) {
+func LoggingGrpcClient(
+	addr string,
+	opts MonitoringOpts,
+) (conn *grpc.ClientConn, err error) {
 	return grpc.NewClient(
 		addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		grpc.WithChainUnaryInterceptor(grpcClientLogger(opts)),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 }
 
 func GrpcClient(addr string) (conn *grpc.ClientConn, err error) {
 	return grpc.NewClient(
 		addr,
-		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 	)
 }
 
@@ -206,55 +226,31 @@ func grpcClientLogger(opts MonitoringOpts) grpc.UnaryClientInterceptor {
 }
 
 func grpcLogger(opts MonitoringOpts) (logging.LoggerFunc, []logging.Option) {
-	logger := slogLogger(opts, nil)
+	logger := slogLogger(opts, &slog.HandlerOptions{Level: opts.Level})
 
 	grpcLoggingOpts := []logging.Option{
-		logging.WithLogOnEvents(logging.FinishCall),
+		logging.WithLogOnEvents(logging.StartCall, logging.FinishCall),
 		logging.WithDurationField(logging.DurationToDurationField),
 		logging.WithFieldsFromContext(func(ctx context.Context) logging.Fields {
 			fields := logging.Fields{}
 
+			if span := trace.SpanContextFromContext(ctx); span.IsSampled() {
+				return logging.Fields{"trace_id", span.TraceID().String()}
+			}
+
 			downloadMeta := GetDownloadMeta(ctx)
 			if downloadMeta != nil {
-				fields = append(fields,
-					"download.function_id", downloadMeta.FunctionID,
-					"download.downloaded", downloadMeta.Downloaded,
-					"download.download_path", downloadMeta.DownloadPath,
-					"download.stored_path", downloadMeta.StoredPath,
-					"download.bytes_written", downloadMeta.BytesWritten,
-					"download.took", downloadMeta.DownloadTook,
-					"download.reused_from_fs", downloadMeta.ReusedFromFS,
-					"download.reused_inflight", downloadMeta.ReusedInFlight,
-				)
+				fields = append(fields, downloadMeta.Fields()...)
 			}
 
 			instanceStartMeta := GetInstanceStartMeta(ctx)
 			if instanceStartMeta != nil {
-				fields = append(fields,
-					"instance_start.function_path", instanceStartMeta.FunctionPath,
-					"instance_start.instance_id", instanceStartMeta.InstanceID,
-					"instance_start.runtime_type", instanceStartMeta.RuntimeType,
-					"instance_start.instance_addr", instanceStartMeta.InstanceAddr,
-					"instance_start.start_took", instanceStartMeta.StartTook,
-					"instance_start.reused_assigned", instanceStartMeta.ReusedAssigned,
-				)
+				fields = append(fields, instanceStartMeta.Fields()...)
 			}
 
 			invokeMeta := GetInvokeMeta(ctx)
 			if invokeMeta != nil {
-				fields = append(fields,
-					"invoke.instance_id", invokeMeta.InstanceID,
-					"invoke.method", invokeMeta.Method,
-					"invoke.path", invokeMeta.Path,
-					"invoke.request_body_bytes", invokeMeta.RequestBodyBytes,
-					"invoke.headers_count", invokeMeta.HeadersCount,
-					"invoke.worker_already_running", invokeMeta.WorkerAlreadyRunning,
-					"invoke.started_worker", invokeMeta.StartedWorker,
-					"invoke.queue_depth_at_enqueue", invokeMeta.QueueDepthAtEnqueue,
-					"invoke.took", invokeMeta.InvocationTook,
-					"invoke.response_status_code", invokeMeta.ResponseStatusCode,
-					"invoke.response_body_bytes", invokeMeta.ResponseBodyBytes,
-				)
+				fields = append(fields, invokeMeta.Fields()...)
 			}
 
 			if len(fields) == 0 {
@@ -275,9 +271,23 @@ func grpcLogger(opts MonitoringOpts) (logging.LoggerFunc, []logging.Option) {
 }
 
 func slogLogger(opts MonitoringOpts, slogOpts *slog.HandlerOptions) *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stdout, slogOpts)).With(
-		slog.String("app", opts.AppName),
-		slog.String("version", opts.AppVersion),
-		slog.String("env", opts.Env),
-	)
+	logger := slog.
+		New(slog.NewTextHandler(os.Stdout, slogOpts)).
+		With(
+			slog.String("app", opts.AppName),
+			slog.String("env", opts.Env),
+		)
+
+	if opts.AppVersion != "" {
+		logger = logger.With(slog.String("version", opts.AppVersion))
+	}
+
+	if opts.AdditionalAttrs != nil {
+		for k, v := range opts.AdditionalAttrs {
+			logger = logger.With(slog.String(k, v))
+		}
+	}
+	slog.SetDefault(logger)
+
+	return logger
 }

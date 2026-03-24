@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
 	grpc "google.golang.org/grpc"
 )
 
@@ -36,6 +37,19 @@ type DownloadMeta struct {
 	ReusedInFlight bool
 }
 
+func (m DownloadMeta) Fields() logging.Fields {
+	return logging.Fields{
+		"download.function_id", m.FunctionID,
+		"download.downloaded", m.Downloaded,
+		"download.download_path", m.DownloadPath,
+		"download.stored_path", m.StoredPath,
+		"download.bytes_written", m.BytesWritten,
+		"download.took", m.DownloadTook,
+		"download.reused_from_fs", m.ReusedFromFS,
+		"download.reused_inflight", m.ReusedInFlight,
+	}
+}
+
 type InstanceStartMeta struct {
 	FunctionPath   string
 	InstanceID     string
@@ -45,8 +59,20 @@ type InstanceStartMeta struct {
 	ReusedAssigned bool
 }
 
+func (m InstanceStartMeta) Fields() logging.Fields {
+	return logging.Fields{
+		"instance_start.function_path", m.FunctionPath,
+		"instance_start.instance_id", m.InstanceID,
+		"instance_start.runtime_type", m.RuntimeType,
+		"instance_start.instance_addr", m.InstanceAddr,
+		"instance_start.start_took", m.StartTook,
+		"instance_start.reused_assigned", m.ReusedAssigned,
+	}
+}
+
 type InvokeMeta struct {
 	InstanceID           string
+	FunctionPath         string
 	Method               string
 	Path                 string
 	RequestBodyBytes     int
@@ -57,6 +83,23 @@ type InvokeMeta struct {
 	InvocationTook       time.Duration
 	ResponseStatusCode   uint32
 	ResponseBodyBytes    int
+}
+
+func (m InvokeMeta) Fields() logging.Fields {
+	return logging.Fields{
+		"invoke.instance_id", m.InstanceID,
+		"invoke.func.path", m.FunctionPath,
+		"invoke.method", m.Method,
+		"invoke.path", m.Path,
+		"invoke.request_body_bytes", m.RequestBodyBytes,
+		"invoke.headers_count", m.HeadersCount,
+		"invoke.worker_already_running", m.WorkerAlreadyRunning,
+		"invoke.started_worker", m.StartedWorker,
+		"invoke.queue_depth_at_enqueue", m.QueueDepthAtEnqueue,
+		"invoke.took", m.InvocationTook,
+		"invoke.response_status_code", m.ResponseStatusCode,
+		"invoke.response_body_bytes", m.ResponseBodyBytes,
+	}
 }
 
 func WithDownloadMetaHolder(

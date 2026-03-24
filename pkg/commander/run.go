@@ -30,10 +30,9 @@ func Run(ctx context.Context, conf CommanderHTTPServerConfig) error {
 	}
 
 	monitoringOpts := server.MonitoringOpts{
-		IsDev:      conf.Env != "PROD",
+		Env:        conf.Env,
 		AppName:    conf.AppName,
 		AppVersion: conf.CommitHash,
-		Env:        conf.Env,
 	}
 
 	otelCfg, otelShutdown, err := server.InitHttpOTEL(ctx, monitoringOpts)

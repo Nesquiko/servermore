@@ -258,6 +258,7 @@ func (r *runnerGrpcServer) InvokeFunctionInstance(
 	}
 	meta.WorkerAlreadyRunning = isRunning
 	meta.StartedWorker = !isRunning
+	meta.FunctionPath = instance.funcPath
 	respCh := instance.AddToQueue(invocationReq)
 	meta.QueueDepthAtEnqueue = len(instance.queue)
 

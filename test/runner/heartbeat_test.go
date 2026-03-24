@@ -12,7 +12,6 @@ import (
 	testingguestconsts "github.com/Nesquiko/servermore/test/testing-guest/consts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/metadata"
 )
 
 func TestHeartbeat_EmptyWhenNoInstancesRunning(t *testing.T) {
@@ -20,8 +19,7 @@ func TestHeartbeat_EmptyWhenNoInstancesRunning(t *testing.T) {
 
 	client := newRunnerClient(t)
 
-	ctx := metadata.AppendToOutgoingContext(t.Context(), "test-name", t.Name())
-	heartbeatResp, err := client.Heartbeat(ctx, nil)
+	heartbeatResp, err := client.Heartbeat(t.Context(), nil)
 	require.NoError(t, err)
 	assert.Empty(t, heartbeatResp.GetQueueDepths())
 }

@@ -34,10 +34,9 @@ func Run(ctx context.Context, conf RunnerConfig) error {
 	defer cancel()
 
 	monitoringOpts := server.MonitoringOpts{
-		IsDev:      conf.Env != "PROD",
+		Env:        conf.Env,
 		AppName:    conf.AppName,
 		AppVersion: conf.CommitHash,
-		Env:        conf.Env,
 	}
 
 	_, otelShutdown, err := server.InitOTEL(ctx, monitoringOpts)

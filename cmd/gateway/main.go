@@ -17,7 +17,6 @@ const FunctionIdPathParam = "functionId"
 func main() {
 	ctx := context.Background()
 	opts := server.MonitoringOpts{
-		IsDev:      false,
 		AppName:    "gateway",
 		AppVersion: "0.0.1",
 		Env:        "LOCAL",

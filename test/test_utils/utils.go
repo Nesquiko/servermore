@@ -130,10 +130,8 @@ func WaitForGrpcReadyWithTiming(
 	addr string,
 ) error {
 	waitingOpts := server.MonitoringOpts{
-		IsDev:      true,
-		AppName:    "grpc-ready-check",
-		AppVersion: "n/a",
-		Env:        "TEST",
+		Env:     "TEST",
+		AppName: "grpc-ready-check",
 	}
 	startTime := time.Now()
 	conn, err := server.LoggingGrpcClient(addr, waitingOpts)
