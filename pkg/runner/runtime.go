@@ -2,11 +2,13 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"os"
 	"os/exec"
+	"syscall"
 	"time"
 
 	"github.com/Nesquiko/servermore/pkg/assert"
@@ -61,13 +63,9 @@ func (n *nativeRuntime) Start(
 
 	instanceAddr := fmt.Sprintf("127.0.0.1:%d", port)
 	meta.InstanceAddr = instanceAddr
-	instanceCmd := exec.Command(funcPath)
-	instanceCmd.Env = append(
-		instanceCmd.Env,
-		fmt.Sprintf("%s=%s", guest.GuestAddrEnvVar, instanceAddr),
-	)
 
-	if err = instanceCmd.Start(); err != nil {
+	instanceCmd, err := startWithRetry(funcPath, instanceAddr)
+	if err != nil {
 		return fmt.Errorf("failed to start the binary: %w", err)
 	}
 
@@ -178,5 +176,32 @@ func waitForHeartbeat(ctx context.Context, client guest.GuestClient) error {
 			return fmt.Errorf("heartbeat didn't succed, errors: %+v", errs)
 		case <-time.After(time.Duration(retries) * 10 * time.Millisecond):
 		}
+	}
+}
+
+const MaxStartRetries = 10
+
+func startWithRetry(funcPath server.AbsolutePath, instanceAddr string) (*exec.Cmd, error) {
+	retries := 0
+	for {
+		retries++
+
+		instanceCmd := exec.Command(funcPath)
+		instanceCmd.Env = append(
+			instanceCmd.Env,
+			fmt.Sprintf("%s=%s", guest.GuestAddrEnvVar, instanceAddr),
+		)
+
+		err := instanceCmd.Start()
+		if nil == err {
+			return instanceCmd, nil
+		} else if !errors.Is(err, syscall.ETXTBSY) {
+			return nil, fmt.Errorf("retry failed with not ETXTBSY error: %w", err)
+		}
+
+		if retries >= MaxStartRetries {
+			return nil, fmt.Errorf("starting cmd failed multiple times: %w", err)
+		}
+		time.Sleep(time.Duration(retries) * 10 * time.Millisecond)
 	}
 }

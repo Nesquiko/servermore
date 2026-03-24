@@ -15,7 +15,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
-	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -34,7 +33,8 @@ type MonitoringOpts struct {
 	AppVersion      string
 	AdditionalAttrs map[string]string
 
-	Level slog.Level
+	Level  slog.Level
+	OTELOn bool
 }
 
 func (o MonitoringOpts) IsDev() bool {
@@ -104,23 +104,17 @@ func InitTracerProvider(
 	res *resource.Resource,
 	opts MonitoringOpts,
 ) (*sdktrace.TracerProvider, error) {
-	var exporter sdktrace.SpanExporter
-	var err error
-
-	if opts.IsDev() {
-		exporter, err = stdouttrace.New(stdouttrace.WithPrettyPrint())
-	} else {
-		exporter, err = otlptracegrpc.New(ctx)
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize exporter: %w", err)
-	}
-
 	tracerOpts := []sdktrace.TracerProviderOption{
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 		sdktrace.WithResource(res),
-		sdktrace.WithBatcher(exporter),
+	}
+
+	if opts.OTELOn {
+		exporter, err := otlptracegrpc.New(ctx)
+		tracerOpts = append(tracerOpts, sdktrace.WithBatcher(exporter))
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize exporter: %w", err)
+		}
 	}
 
 	return sdktrace.NewTracerProvider(tracerOpts...), nil
@@ -135,7 +129,7 @@ func InitMeter(
 		sdkmetric.WithResource(res),
 	}
 
-	if !opts.IsDev() {
+	if opts.OTELOn {
 		exporter, err := otlpmetricgrpc.New(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize exporter: %w", err)

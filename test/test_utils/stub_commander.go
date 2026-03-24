@@ -17,6 +17,7 @@ import (
 	"github.com/Nesquiko/servermore/pkg/server"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/riandyrn/otelchi/metric"
 	grpc "google.golang.org/grpc"
 )
 
@@ -36,8 +37,12 @@ type StubCommander struct {
 }
 
 func RunStubCommander(ctx context.Context) *StubCommander {
+	monitoringOpts := server.MonitoringOpts{
+		AppName: "stub-commander",
+	}
+
 	stub := runGrpcStub(ctx)
-	runHttpStub(ctx, stub)
+	runHttpStub(ctx, stub, monitoringOpts)
 	return stub
 }
 
@@ -73,7 +78,7 @@ func runGrpcStub(ctx context.Context) *StubCommander {
 	return stub
 }
 
-func runHttpStub(ctx context.Context, stub *StubCommander) {
+func runHttpStub(ctx context.Context, stub *StubCommander, opts server.MonitoringOpts) {
 	port, err := RandomFreePort()
 	assert.NoError(err)
 
@@ -81,6 +86,8 @@ func runHttpStub(ctx context.Context, stub *StubCommander) {
 
 	r := chi.NewMux()
 	r.Use(middleware.Heartbeat(server.HeartbeatEndpoint))
+	r.Use(server.HttpMiddleware(metric.BaseConfig{}, opts)...)
+
 	h := api.HandlerFromMux(stub, r)
 	h = server.WithAPIErrorHolder(h)
 	s := &http.Server{Handler: h, Addr: stub.HttpAddr()}
@@ -187,9 +194,12 @@ func (s *StubCommander) CreateFunction(w http.ResponseWriter, r *http.Request) {
 }
 
 // DownloadFunctionBinary implements [api.ServerInterface].
-func (s *StubCommander) DownloadFunctionBinary(w http.ResponseWriter, r *http.Request, id int64) {
-	funcId := chi.URLParam(r, "id")
-	filename := fmt.Sprintf("%s.bin", funcId)
+func (s *StubCommander) DownloadFunctionBinary(
+	w http.ResponseWriter,
+	r *http.Request,
+	funcId string,
+) {
+	filename := funcId
 
 	s.errorOnPathsMu.RLock()
 	if err, ok := s.errorOnPaths[filename]; ok {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/Nesquiko/servermore/pkg/guest"
 	testingguestconsts "github.com/Nesquiko/servermore/test/testing-guest/consts"
@@ -11,6 +12,13 @@ import (
 func handler(ctx context.Context, req *guest.InvocationRequest) (*guest.InvocationResponse, error) {
 	switch req.GetPath() {
 	case testingguestconsts.PathOK:
+		return &guest.InvocationResponse{
+			StatusCode: 200,
+			Headers:    map[string]string{"content-type": testingguestconsts.HeaderJSON},
+			Body:       []byte(testingguestconsts.BodyOK),
+		}, nil
+	case testingguestconsts.PathDelayed:
+		time.Sleep(testingguestconsts.PathDelayedDelay)
 		return &guest.InvocationResponse{
 			StatusCode: 200,
 			Headers:    map[string]string{"content-type": testingguestconsts.HeaderJSON},

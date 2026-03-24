@@ -22,8 +22,8 @@ func TestInvokeFunctionInstance_OKResponseFromTestingGuest(t *testing.T) {
 
 	client := newRunnerClient(t)
 
-	const functionID int64 = 201
-	const functionFilename = "201.bin"
+	functionID := testutils.AddRandomPart("201")
+	functionFilename := functionID
 
 	binaryPath, err := filepath.Abs(testutils.TestingBinaryPath)
 	require.NoError(t, err)
@@ -54,8 +54,8 @@ func TestInvokeFunctionInstance_NotFoundPathReturnedByGuest(t *testing.T) {
 
 	client := newRunnerClient(t)
 
-	const functionID int64 = 202
-	const functionFilename = "202.bin"
+	functionID := testutils.AddRandomPart("202")
+	functionFilename := functionID
 
 	binaryPath, err := filepath.Abs(testutils.TestingBinaryPath)
 	require.NoError(t, err)
@@ -68,7 +68,7 @@ func TestInvokeFunctionInstance_NotFoundPathReturnedByGuest(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, prepareResp.GetInstanceId())
 
-	notFoundPath := fmt.Sprintf("/not-found-%d", functionID)
+	notFoundPath := fmt.Sprintf("/not-found-%s", functionID)
 	invokeResp, err := client.InvokeFunctionInstance(t.Context(), &runner.InvokeInstanceRequest{
 		InstanceId: prepareResp.GetInstanceId(),
 		Method:     http.MethodGet,
@@ -86,8 +86,8 @@ func TestInvokeFunctionInstance_ReturnsErrorWhenGuestReturnsRPCError(t *testing.
 
 	client := newRunnerClient(t)
 
-	const functionID int64 = 203
-	const functionFilename = "203.bin"
+	functionID := testutils.AddRandomPart("203")
+	functionFilename := functionID
 
 	binaryPath, err := filepath.Abs(testutils.TestingBinaryPath)
 	require.NoError(t, err)
@@ -115,8 +115,8 @@ func TestInvokeFunctionInstance_ReturnsErrorWhenGuestReturnsNilResponse(t *testi
 
 	client := newRunnerClient(t)
 
-	const functionID int64 = 204
-	const functionFilename = "204.bin"
+	functionID := testutils.AddRandomPart("204")
+	functionFilename := functionID
 
 	binaryPath, err := filepath.Abs(testutils.TestingBinaryPath)
 	require.NoError(t, err)
@@ -177,9 +177,8 @@ func TestInvokeFunctionInstance_ConcurrentRequestsReuseSamePreparedInstance(t *t
 
 	client := newRunnerClient(t)
 
-	const functionID int64 = 205
-	const functionFilename = "205.bin"
-	const requestsCount = 10
+	functionID := testutils.AddRandomPart("205")
+	functionFilename := functionID
 
 	binaryPath, err := filepath.Abs(testutils.TestingBinaryPath)
 	require.NoError(t, err)
@@ -192,6 +191,7 @@ func TestInvokeFunctionInstance_ConcurrentRequestsReuseSamePreparedInstance(t *t
 	require.NoError(t, err)
 	require.NotEmpty(t, prepareResp.GetInstanceId())
 
+	requestsCount := 10
 	responses := make([]*runner.InvokeInstanceResponse, requestsCount)
 	errs := make([]error, requestsCount)
 
@@ -226,8 +226,8 @@ func TestInvokeFunctionInstance_AfterInstanceShutdownReturnsError(t *testing.T) 
 
 	client := newRunnerClient(t)
 
-	const functionID int64 = 206
-	const functionFilename = "206.bin"
+	functionID := testutils.AddRandomPart("206")
+	functionFilename := functionID
 
 	binaryPath, err := filepath.Abs(testutils.TestingBinaryPath)
 	require.NoError(t, err)
@@ -257,8 +257,8 @@ func TestPrepareFunctionInstance_SequentialPreparesCreateDistinctInstances(t *te
 
 	client := newRunnerClient(t)
 
-	const functionID int64 = 207
-	const functionFilename = "207.bin"
+	functionID := testutils.AddRandomPart("207")
+	functionFilename := functionID
 
 	binaryPath, err := filepath.Abs(testutils.TestingBinaryPath)
 	require.NoError(t, err)

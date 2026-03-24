@@ -59,7 +59,7 @@ const ContextErrorKey = "error"
 
 func ErrorHandlerFunc(w http.ResponseWriter, r *http.Request, err error) {
 	if invalidParamErr, ok := errors.AsType[*commonapi.InvalidParamFormatError](err); ok {
-		EncodeError(w, r, fromInvalidParamErr(invalidParamErr))
+		EncodeError(w, r, FromInvalidParamErr(invalidParamErr))
 		return
 	} else if requiredParamErr, ok := errors.AsType[*commonapi.RequiredParamError](err); ok {
 		EncodeError(w, r, fromRequiredParamErr(requiredParamErr))
@@ -83,7 +83,7 @@ const (
 	InvalidParamErrorDetail = "Invalid path param %q"
 )
 
-func fromInvalidParamErr(err *commonapi.InvalidParamFormatError) Error {
+func FromInvalidParamErr(err *commonapi.InvalidParamFormatError) Error {
 	return Error{
 		Cause:  err,
 		Code:   InvalidParamErrorCode,

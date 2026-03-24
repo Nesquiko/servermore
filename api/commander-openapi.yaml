@@ -50,8 +50,7 @@ paths:
           required: true
           description: Unique function identifier.
           schema:
-            type: integer
-            format: int64
+            type: string
       responses:
         '200':
           description: Function binary streamed successfully.

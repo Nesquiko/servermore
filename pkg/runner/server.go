@@ -320,19 +320,19 @@ outer:
 
 func (r *runnerGrpcServer) downloadFunction(
 	ctx context.Context,
-	functionId int64,
+	functionId string,
 ) (server.AbsolutePath, int64, time.Duration, error) {
 	startTime := time.Now()
 	resp, err := r.commanderHttpClient.DownloadFunctionBinary(ctx, functionId)
 	if err != nil {
-		return "", 0, 0, fmt.Errorf("download function id '%d' failed: %w", functionId, err)
+		return "", 0, 0, fmt.Errorf("download function id '%s' failed: %w", functionId, err)
 	}
 	defer resp.Body.Close()
 
 	switch resp.StatusCode {
 	case http.StatusNotFound:
 		return "", 0, 0, fmt.Errorf(
-			"download failed, function with id '%d' wasn't found",
+			"download failed, function with id '%s' wasn't found",
 			functionId,
 		)
 	case http.StatusInternalServerError:
@@ -347,7 +347,7 @@ func (r *runnerGrpcServer) downloadFunction(
 
 	if err := os.MkdirAll(funcDir, 0o755); err != nil {
 		return "", 0, 0, fmt.Errorf(
-			"failed to create the dir %q path of downloaded function '%d': %w",
+			"failed to create the dir %q path of downloaded function '%s': %w",
 			funcPath, functionId, err,
 		)
 	}
@@ -355,7 +355,7 @@ func (r *runnerGrpcServer) downloadFunction(
 	tmpFile, err := os.CreateTemp(funcDir, fmt.Sprintf("%s-*", responseFuncName))
 	if err != nil {
 		return "", 0, 0, fmt.Errorf(
-			"failed to create temp download file in dir %q for function '%d': %w",
+			"failed to create temp download file in dir %q for function '%s': %w",
 			funcDir, functionId, err,
 		)
 	}
@@ -364,7 +364,7 @@ func (r *runnerGrpcServer) downloadFunction(
 	if err != nil {
 		server.DeleteFile(tmpFile.Name())
 		return "", 0, 0, fmt.Errorf(
-			"failed copy bytes of to temp function file %q for function '%d': %w",
+			"failed copy bytes of to temp function file %q for function '%s': %w",
 			tmpFile.Name(), functionId, err,
 		)
 	}
@@ -372,7 +372,7 @@ func (r *runnerGrpcServer) downloadFunction(
 	if err = tmpFile.Close(); err != nil {
 		server.DeleteFile(tmpFile.Name())
 		return "", 0, 0, fmt.Errorf(
-			"failed to close temp function file %q for function '%d': %w",
+			"failed to close temp function file %q for function '%s': %w",
 			tmpFile.Name(), functionId, err,
 		)
 	}
@@ -381,7 +381,7 @@ func (r *runnerGrpcServer) downloadFunction(
 	if err != nil {
 		server.DeleteFile(tmpFile.Name())
 		return "", 0, 0, fmt.Errorf(
-			"failed to change perms on temp function file %q for function '%d': %w",
+			"failed to change perms on temp function file %q for function '%s': %w",
 			tmpFile.Name(), functionId, err,
 		)
 	}

@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	commonapi "github.com/Nesquiko/servermore/pkg/api/common"
 	"github.com/go-chi/chi/v5/middleware"
 	otelchimetric "github.com/riandyrn/otelchi/metric"
 )
@@ -15,15 +14,21 @@ const HeartbeatEndpoint = "/monitoring/heartbeat"
 func HttpMiddleware(
 	otelCfg otelchimetric.BaseConfig,
 	loggingOpts MonitoringOpts,
-) []commonapi.MiddlewareFunc {
-	return []commonapi.MiddlewareFunc{
+) []func(http.Handler) http.Handler {
+	ms := []func(http.Handler) http.Handler{
 		WithAPIErrorHolder,
 		CreateHTTPLogger(loggingOpts),
 		middleware.Recoverer,
-		otelchimetric.NewRequestDurationMillis(otelCfg),
-		otelchimetric.NewRequestInFlight(otelCfg),
-		otelchimetric.NewResponseSizeBytes(otelCfg),
 	}
+
+	if loggingOpts.OTELOn {
+		ms = append(ms,
+			otelchimetric.NewRequestDurationMillis(otelCfg),
+			otelchimetric.NewRequestInFlight(otelCfg),
+			otelchimetric.NewResponseSizeBytes(otelCfg),
+		)
+	}
+	return ms
 }
 
 type (

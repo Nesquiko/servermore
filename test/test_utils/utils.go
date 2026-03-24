@@ -2,6 +2,8 @@ package testutils
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -13,17 +15,21 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Nesquiko/servermore/pkg/assert"
 	"github.com/Nesquiko/servermore/pkg/runner"
 	"github.com/Nesquiko/servermore/pkg/server"
 	"google.golang.org/grpc/connectivity"
 )
 
-var TestingBinaryPath = filepath.Join("..", "..", "tmp", "testing-guest")
+var (
+	BuildDir          = filepath.Join("..", "..", "tmp")
+	TestingBinaryPath = filepath.Join("..", "..", "tmp", "testing-guest")
+)
 
 // SubdirInTempDir creates new directory in the /tmp/servermore-*/subdir,
 // However the subdir is not created, to let the app handle the creation itself
 func SubdirInTempDir(subdir string) (string, error) {
-	tmpDir, err := os.MkdirTemp("", "servermove-*")
+	tmpDir, err := os.MkdirTemp(BuildDir, "servermove-*")
 	if err != nil {
 		return "", err
 	}
@@ -163,4 +169,11 @@ func WaitForGrpcReadyWithTiming(
 			time.Sleep(interval)
 		}
 	}
+}
+
+func AddRandomPart(s string) string {
+	bytes := make([]byte, 4)
+	_, err := rand.Read(bytes)
+	assert.NoError(err)
+	return fmt.Sprintf("%s-%s", s, hex.EncodeToString(bytes))
 }

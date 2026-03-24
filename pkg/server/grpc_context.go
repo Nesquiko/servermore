@@ -27,7 +27,7 @@ type (
 )
 
 type DownloadMeta struct {
-	FunctionID     int64
+	FunctionID     string
 	Downloaded     bool
 	DownloadPath   string
 	StoredPath     string

@@ -84,12 +84,17 @@ func TestMain(m *testing.M) {
 
 func newRunnerClient(t *testing.T) runner.RunnerClient {
 	t.Helper()
+	return newRunnerClientWithLog(t, slog.LevelInfo)
+}
+
+func newRunnerClientWithLog(t *testing.T, logLevel slog.Level) runner.RunnerClient {
+	t.Helper()
 
 	monitoringOpts := server.MonitoringOpts{
 		Env:             "TEST",
 		AppName:         "runner-test-client",
 		AdditionalAttrs: map[string]string{"test.name": t.Name()},
-		Level:           slog.LevelDebug,
+		Level:           logLevel,
 	}
 
 	conn, err := server.LoggingGrpcClient(ServerUrl, monitoringOpts)
@@ -104,7 +109,7 @@ func newRunnerClient(t *testing.T) runner.RunnerClient {
 func prepareFunctionInstance(
 	t *testing.T,
 	client runner.RunnerClient,
-	functionID int64,
+	functionID string,
 	functionPath string,
 ) (*runner.PrepareInstanceResponse, error) {
 	t.Helper()

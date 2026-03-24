@@ -18,8 +18,8 @@ func TestPrepareFunctionInstance_DownloadsBinaryToRunnerStorageRoot(t *testing.T
 
 	client := newRunnerClient(t)
 
-	const functionID int64 = 101
-	const functionFilename = "101.bin"
+	functionID := testutils.AddRandomPart("101")
+	functionFilename := functionID
 
 	binaryPath, err := filepath.Abs(testutils.TestingBinaryPath)
 	require.NoError(t, err)
@@ -64,9 +64,8 @@ func TestPrepareFunctionInstance_ConcurrentRequestsShareOneDownload(t *testing.T
 
 	client := newRunnerClient(t)
 
-	const functionID int64 = 102
-	const functionFilename = "102.bin"
-	const requestsCount = 10
+	functionID := testutils.AddRandomPart("102")
+	functionFilename := functionID
 
 	binaryPath, err := filepath.Abs(testutils.TestingBinaryPath)
 	require.NoError(t, err)
@@ -78,6 +77,7 @@ func TestPrepareFunctionInstance_ConcurrentRequestsShareOneDownload(t *testing.T
 	expectedRunnerPath := filepath.Join(TestRunnerStorageRoot, functionPath)
 	require.NoError(t, testutils.DeleteIfExists(expectedRunnerPath))
 
+	requestsCount := 10
 	responses := make([]*runner.PrepareInstanceResponse, requestsCount)
 	errs := make([]error, requestsCount)
 
@@ -115,9 +115,8 @@ func TestPrepareFunctionInstance_ConcurentErrorsWhenDownloadFails(t *testing.T) 
 
 	client := newRunnerClient(t)
 
-	const functionID int64 = 103
-	const functionFilename = "103.bin"
-	const requestsCount = 10
+	functionID := testutils.AddRandomPart("103")
+	functionFilename := functionID
 
 	functionPath := StubCommander.PathFor(functionFilename)
 	expectedRunnerPath := filepath.Join(TestRunnerStorageRoot, functionPath)
@@ -126,6 +125,7 @@ func TestPrepareFunctionInstance_ConcurentErrorsWhenDownloadFails(t *testing.T) 
 	downloadErr := errors.New("stub commander forced download failure")
 	StubCommander.MarkPathToError(functionFilename, downloadErr)
 
+	requestsCount := 10
 	responses := make([]*runner.PrepareInstanceResponse, requestsCount)
 	errs := make([]error, requestsCount)
 
@@ -142,7 +142,13 @@ func TestPrepareFunctionInstance_ConcurentErrorsWhenDownloadFails(t *testing.T) 
 	for i := range requestsCount {
 		require.Error(t, errs[i])
 		assert.Nil(t, responses[i])
-		assert.ErrorContains(t, errs[i], "download failed, commander errored")
+		assert.ErrorAs(
+			t,
+			errs[i],
+			&downloadErr,
+			"commander errored with different than expected error %v",
+			errs[i],
+		)
 	}
 
 	assert.NoFileExists(t, expectedRunnerPath)

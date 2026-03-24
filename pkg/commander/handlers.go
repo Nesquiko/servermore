@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	api "github.com/Nesquiko/servermore/pkg/api/commander"
+	commonapi "github.com/Nesquiko/servermore/pkg/api/common"
 	"github.com/Nesquiko/servermore/pkg/server"
 )
 
@@ -104,14 +105,26 @@ func (c *CommanderHTTPServer) CreateFunction(w http.ResponseWriter, r *http.Requ
 func (c *CommanderHTTPServer) DownloadFunctionBinary(
 	w http.ResponseWriter,
 	r *http.Request,
-	id int64,
+	id string,
 ) {
-	function, err := c.service.FunctionByID(r.Context(), id)
+	funcId, err := strconv.ParseInt(id, 10, 0)
+	if err != nil {
+		server.EncodeError(
+			w,
+			r,
+			server.FromInvalidParamErr(
+				&commonapi.InvalidParamFormatError{ParamName: "id", Err: err},
+			),
+		)
+		return
+	}
+
+	function, err := c.service.FunctionByID(r.Context(), funcId)
 	if errors.Is(err, ErrFunctionNotFound) {
 		server.EncodeError(w, r, server.Error{
 			Cause:  err,
 			Code:   "function.not.found",
-			Detail: fmt.Sprintf("Function with id '%d' not found", id),
+			Detail: fmt.Sprintf("Function with id '%d' not found", funcId),
 			Status: http.StatusNotFound,
 			Title:  "Function not found",
 		})

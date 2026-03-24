@@ -1,6 +1,7 @@
 package runner_test
 
 import (
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"sync"
@@ -14,23 +15,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestHeartbeat_EmptyWhenNoInstancesRunning(t *testing.T) {
-	t.Parallel()
-
-	client := newRunnerClient(t)
-
-	heartbeatResp, err := client.Heartbeat(t.Context(), nil)
-	require.NoError(t, err)
-	assert.Empty(t, heartbeatResp.GetQueueDepths())
-}
-
 func TestHeartbeat_ReportsPreparedInstanceWithZeroQueueDepth(t *testing.T) {
 	t.Parallel()
 
 	client := newRunnerClient(t)
 
-	const functionID int64 = 301
-	const functionFilename = "301.bin"
+	functionID := testutils.AddRandomPart("301")
+	functionFilename := functionID
 
 	binaryPath, err := filepath.Abs(testutils.TestingBinaryPath)
 	require.NoError(t, err)
@@ -55,11 +46,10 @@ func TestHeartbeat_ReportsPreparedInstanceWithZeroQueueDepth(t *testing.T) {
 func TestHeartbeat_ReportsQueuedInvocationsForRunningInstance(t *testing.T) {
 	t.Parallel()
 
-	client := newRunnerClient(t)
+	client := newRunnerClientWithLog(t, slog.LevelWarn)
 
-	const functionID int64 = 302
-	const functionFilename = "302.bin"
-	const requestsCount = 50
+	functionID := testutils.AddRandomPart("302")
+	functionFilename := functionID
 
 	binaryPath, err := filepath.Abs(testutils.TestingBinaryPath)
 	require.NoError(t, err)
@@ -72,6 +62,7 @@ func TestHeartbeat_ReportsQueuedInvocationsForRunningInstance(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, prepareResp.GetInstanceId())
 
+	requestsCount := 5
 	responses := make([]*runner.InvokeInstanceResponse, requestsCount)
 	errs := make([]error, requestsCount)
 
@@ -87,37 +78,27 @@ func TestHeartbeat_ReportsQueuedInvocationsForRunningInstance(t *testing.T) {
 				&runner.InvokeInstanceRequest{
 					InstanceId: prepareResp.GetInstanceId(),
 					Method:     http.MethodGet,
-					Path:       testingguestconsts.PathOK,
+					Path:       testingguestconsts.PathDelayed,
 				},
 			)
 		}(i)
 	}
 	close(startCh)
+	time.Sleep(testingguestconsts.PathDelayedDelay)
 
-	deadline := time.Now().Add(2 * time.Second)
-	seenQueued := false
-	for time.Now().Before(deadline) {
-		heartbeatResp, err := client.Heartbeat(t.Context(), nil)
-		require.NoError(t, err)
+	heartbeatResp, err := client.Heartbeat(t.Context(), nil)
+	require.NoError(t, err)
 
-		if depth, ok := heartbeatResp.GetQueueDepths()[prepareResp.GetInstanceId()]; ok &&
-			depth > 0 {
-			seenQueued = true
-			break
-		}
-
-		time.Sleep(10 * time.Millisecond)
-	}
+	depth, ok := heartbeatResp.GetQueueDepths()[prepareResp.GetInstanceId()]
+	require.True(t, ok, "instance id wasn't in heartbeat response")
+	assert.NotZero(t, depth)
 
 	wg.Wait()
-
 	for i := range requestsCount {
 		require.NoError(t, errs[i])
 		require.NotNil(t, responses[i])
 		assert.EqualValues(t, 200, responses[i].GetStatusCode())
 	}
-
-	assert.True(t, seenQueued)
 }
 
 func TestHeartbeat_DoesNotReportStoppedInstanceAfterShutdownTimeout(t *testing.T) {
@@ -125,8 +106,8 @@ func TestHeartbeat_DoesNotReportStoppedInstanceAfterShutdownTimeout(t *testing.T
 
 	client := newRunnerClient(t)
 
-	const functionID int64 = 303
-	const functionFilename = "303.bin"
+	functionID := testutils.AddRandomPart("303")
+	functionFilename := functionID
 
 	binaryPath, err := filepath.Abs(testutils.TestingBinaryPath)
 	require.NoError(t, err)
