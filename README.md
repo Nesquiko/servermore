@@ -2,6 +2,11 @@
 
 Servermore is a simplified serverless platform written in Go.
 
+## DEV setup
+
+This project uses [mise](https://mise.jdx.dev/) for tool management. Install
+it and run `mise install`. You have everything you need for the project (hopefully).
+
 ## Overview
 
 The system is split into four components:

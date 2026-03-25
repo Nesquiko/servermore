@@ -7,8 +7,6 @@ oapi-codegen = "v2.6.0"
 protoc = "34.0"
 protoc-gen-go = "1.36.11"
 protoc-gen-go-grpc = "1.6.1"
-fzf = "latest"
-ripgrep = "latest"
 
 [tasks.build]
 depends = ['sqlc-generate', 'openapi-generate', 'grpc-generate']
@@ -33,7 +31,7 @@ run = [
 ]
 
 [tasks.test-by-name]
-description = "Runs selected test function."
+description = "Runs selected test function, needs fzf and rg as external deps."
 depends = ['test-setup']
 run = '''
 TEST_NAME=$(rg -o 'func Test.*\(t \*testing.T.*\)' | sed -e 's/func\s\(Test.*\)(t\s\*testing\.T)/ \1/g' | fzf --prompt 'Test to run: ' | rg -o 'Test.*')
