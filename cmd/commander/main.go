@@ -10,8 +10,8 @@ import (
 
 func main() {
 	config := commander.CommanderConfig{
-		AppName:         "commander",
 		Env:             "LOCAL",
+		AppName:         "commander",
 		Host:            "localhost",
 		HttpPort:        "42069",
 		GrpcPort:        "42070",
