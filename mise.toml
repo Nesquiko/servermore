@@ -24,6 +24,7 @@ run = [
 
 [tasks.test]
 description = "Runs all the test in repo"
+depends = ['build']
 usage = '''
 flag "--count <count>" help="How many times to run tests" default="1"
 '''
