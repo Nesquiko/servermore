@@ -30,7 +30,7 @@ func TestCreateFunction_Created(t *testing.T) {
 		binaryBytes,
 	)
 
-	req, err := http.NewRequest(http.MethodPost, ServerUrl+"/functions", bodyFile)
+	req, err := http.NewRequest(http.MethodPost, HttpServerUrl+"/functions", bodyFile)
 	require.NoError(t, err, "create request")
 	req.Header.Set("Content-Type", contentType)
 
@@ -72,7 +72,7 @@ func TestCreateFunction_ConflictOnDuplicate(t *testing.T) {
 		binaryBytes,
 	)
 
-	req, err := http.NewRequest(http.MethodPost, ServerUrl+"/functions", bodyFile)
+	req, err := http.NewRequest(http.MethodPost, HttpServerUrl+"/functions", bodyFile)
 	require.NoError(t, err, "create first request")
 	req.Header.Set("Content-Type", contentType)
 
@@ -88,7 +88,7 @@ func TestCreateFunction_ConflictOnDuplicate(t *testing.T) {
 		binaryBytes,
 	)
 
-	req2, err := http.NewRequest(http.MethodPost, ServerUrl+"/functions", bodyFile2)
+	req2, err := http.NewRequest(http.MethodPost, HttpServerUrl+"/functions", bodyFile2)
 	require.NoError(t, err, "create second request")
 	req2.Header.Set("Content-Type", contentType2)
 
@@ -118,7 +118,7 @@ func TestCreateFunction_BadRequestWhenTooLarge(t *testing.T) {
 		binaryBytes,
 	)
 
-	req, err := http.NewRequest(http.MethodPost, ServerUrl+"/functions", bodyFile)
+	req, err := http.NewRequest(http.MethodPost, HttpServerUrl+"/functions", bodyFile)
 	require.NoError(t, err, "create request")
 	req.Header.Set("Content-Type", contentType)
 
@@ -142,7 +142,7 @@ func TestCreateFunction_BadRequestWhenMultipartMalformed(t *testing.T) {
 	body := bytes.NewBufferString(
 		"--bad-boundary\r\nthis is not valid multipart\r\n--bad-boundary--\r\n",
 	)
-	req, err := http.NewRequest(http.MethodPost, ServerUrl+"/functions", body)
+	req, err := http.NewRequest(http.MethodPost, HttpServerUrl+"/functions", body)
 	require.NoError(t, err, "create malformed request")
 	req.Header.Set("Content-Type", "multipart/form-data; boundary=bad-boundary")
 
@@ -174,7 +174,7 @@ func TestCreateFunction_BadRequestWhenBinaryMissing(t *testing.T) {
 	_, err = bodyFile.Seek(0, 0)
 	require.NoError(t, err, "rewind multipart body file")
 
-	req, err := http.NewRequest(http.MethodPost, ServerUrl+"/functions", bodyFile)
+	req, err := http.NewRequest(http.MethodPost, HttpServerUrl+"/functions", bodyFile)
 	require.NoError(t, err, "create request")
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 

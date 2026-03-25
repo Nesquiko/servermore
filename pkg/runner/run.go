@@ -71,8 +71,8 @@ func Run(ctx context.Context, conf RunnerConfig) error {
 	case <-ctx.Done():
 		slog.Info("shutting down runner")
 
-		runnerCloser()
 		grpcServer.GracefulStop()
+		runnerCloser()
 
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()

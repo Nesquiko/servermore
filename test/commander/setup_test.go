@@ -11,10 +11,13 @@ import (
 	"github.com/Nesquiko/servermore/pkg/commander"
 	"github.com/Nesquiko/servermore/pkg/server"
 	testutils "github.com/Nesquiko/servermore/test/test_utils"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
-	ServerUrl       string
+	HttpServerUrl   string
+	GrcpServerUrl   string
 	TestStorageRoot string
 	DbFilePath      string
 )
@@ -24,9 +27,15 @@ func TestMain(m *testing.M) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	port, err := testutils.RandomFreePort()
+	httpPort, err := testutils.RandomFreePort()
 	if err != nil {
-		slog.Error("failed to allocate test port", "error", err)
+		slog.Error("failed to allocate commander http port", "error", err)
+		os.Exit(1)
+	}
+
+	grpcPort, err := testutils.RandomFreePort()
+	if err != nil {
+		slog.Error("failed to allocate commander grpc port", "error", err)
 		os.Exit(1)
 	}
 
@@ -37,27 +46,37 @@ func TestMain(m *testing.M) {
 	}
 	DbFilePath = filepath.Join(TestStorageRoot, "test-commander.db")
 
-	config := commander.CommanderHTTPServerConfig{
+	config := commander.CommanderConfig{
 		AppName:         "test-commander",
-		CommitHash:      "test",
 		Env:             "TEST",
 		Host:            "localhost",
-		Port:            port,
-		BaseURL:         "",
+		HttpPort:        httpPort,
+		GrpcPort:        grpcPort,
 		DbURI:           DbFilePath,
 		FuncStorageRoot: TestStorageRoot,
 	}
-	ServerUrl = fmt.Sprintf("http://%s:%s", config.Host, config.Port)
+	HttpServerUrl = fmt.Sprintf("http://%s:%s", config.Host, config.HttpPort)
+	GrcpServerUrl = config.GrpcAddr()
 
 	runErrCh := make(chan error, 1)
 	go func() {
 		runErrCh <- commander.Run(ctx, config)
 	}()
 
-	readyErrCh := make(chan error, 1)
-	go func() {
-		readyErrCh <- testutils.WaitForHttpReady(ctx, "commander", ServerUrl+server.HeartbeatEndpoint)
-	}()
+	var eg errgroup.Group
+	eg.Go(func() error {
+		return testutils.WaitForHttpReady(
+			ctx,
+			"commander-http",
+			HttpServerUrl+server.HeartbeatEndpoint,
+		)
+	})
+	eg.Go(func() error {
+		return testutils.WaitForGrpcReady(ctx, "commander-grpc", GrcpServerUrl)
+	})
+
+	errCh := make(chan error, 1)
+	errCh <- eg.Wait()
 
 	select {
 	case err = <-runErrCh:
@@ -67,9 +86,9 @@ func TestMain(m *testing.M) {
 		}
 		slog.Error("commander exited before becoming ready")
 		os.Exit(1)
-	case err = <-readyErrCh:
-		if err != nil {
-			slog.Error("ready endpoint not answering", "error", err)
+	case err = <-errCh:
+		if err := eg.Wait(); err != nil {
+			slog.Error("commander http/grpc server is not ready", "error", err)
 			os.Exit(1)
 		}
 	}
@@ -80,4 +99,23 @@ func TestMain(m *testing.M) {
 	}
 
 	os.Exit(exitCode)
+}
+
+func newCommanderClient(t *testing.T) commander.CommanderClient {
+	t.Helper()
+
+	monitoringOpts := server.MonitoringOpts{
+		Env:             "TEST",
+		AppName:         "commander-test-client",
+		AdditionalAttrs: map[string]string{"test.name": t.Name()},
+		Level:           slog.LevelDebug,
+	}
+
+	conn, err := server.LoggingGrpcClient(GrcpServerUrl, monitoringOpts)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		server.CloseConn(conn)
+	})
+
+	return commander.NewCommanderClient(conn)
 }

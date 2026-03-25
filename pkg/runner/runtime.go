@@ -82,7 +82,7 @@ func (n *nativeRuntime) Start(
 
 	readyErr := <-readyCh
 	if readyErr != nil {
-		CloseConn(conn)
+		server.CloseConn(conn)
 		closeCmd(instanceCmd)
 		meta.StartTook = time.Since(startTime)
 		return fmt.Errorf(
@@ -111,7 +111,7 @@ func (n *nativeRuntime) Invoke(
 
 // Stop implements [FunctionRuntime].
 func (n *nativeRuntime) Stop() {
-	CloseConn(n.conn, slog.String("addr", n.addr))
+	server.CloseConn(n.conn, slog.String("addr", n.addr))
 	closeCmd(n.cmd)
 }
 
@@ -126,14 +126,6 @@ func FreePort() (port int, err error) {
 		}
 	}
 	return
-}
-
-func CloseConn(conn *grpc.ClientConn, logAttrs ...any) {
-	assert.That(conn != nil, "caller send nil connection")
-	if err := conn.Close(); err != nil {
-		logAttrs = append(logAttrs, slog.Any("error", err))
-		slog.Error("closing client connection failed", logAttrs...)
-	}
 }
 
 const ExitCmdWaitDelay = 5 * time.Second

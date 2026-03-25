@@ -10,7 +10,7 @@ create table functions (
 
 create table runners (
     id integer primary key,
-    ip text not null unique,
+    addr text not null unique,
 
     created_at datetime not null default current_timestamp,
     updated_at datetime not null default current_timestamp

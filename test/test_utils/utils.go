@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/Nesquiko/servermore/pkg/assert"
-	"github.com/Nesquiko/servermore/pkg/runner"
 	"github.com/Nesquiko/servermore/pkg/server"
 	"google.golang.org/grpc/connectivity"
 )
@@ -144,7 +143,7 @@ func WaitForGrpcReadyWithTiming(
 	if err != nil {
 		return fmt.Errorf("failed to initialize grpc connection: %w", err)
 	}
-	defer runner.CloseConn(conn)
+	defer server.CloseConn(conn)
 	conn.Connect()
 
 	for {

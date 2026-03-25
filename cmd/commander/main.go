@@ -8,27 +8,20 @@ import (
 	"github.com/Nesquiko/servermore/pkg/commander"
 )
 
-var (
-	AppName    = "commander"
-	CommitHash = "n/a"
-	Env        = "LOCAL"
-)
-
 func main() {
-	config := commander.CommanderHTTPServerConfig{
-		AppName:         AppName,
-		CommitHash:      CommitHash,
-		Env:             Env,
+	config := commander.CommanderConfig{
+		AppName:         "commander",
+		Env:             "LOCAL",
 		Host:            "localhost",
-		Port:            "42069",
-		BaseURL:         "",
+		HttpPort:        "42069",
+		GrpcPort:        "42070",
 		DbURI:           "./tmp/commander.db",
 		FuncStorageRoot: "/tmp/commander",
 	}
 
 	ctx := context.Background()
 	if err := commander.Run(ctx, config); err != nil {
-		slog.Error("server failed", "error", err)
+		slog.Error("commander server failed", "error", err)
 		os.Exit(1)
 	}
 }

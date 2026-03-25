@@ -20,18 +20,6 @@ const (
 	DownloadHeaderFunctionPath     = "Function-Path"
 )
 
-type CommanderHTTPServerConfig struct {
-	AppName    string
-	CommitHash string
-	Env        string
-
-	Host            string
-	Port            string
-	BaseURL         string
-	DbURI           string
-	FuncStorageRoot AbsolutePath
-}
-
 type CommanderHTTPServer struct {
 	service *CommanderService
 }
@@ -39,7 +27,7 @@ type CommanderHTTPServer struct {
 // Typechecks if CommanderHTTPServer conforms to the interface
 var _ api.ServerInterface = (*CommanderHTTPServer)(nil)
 
-func NewCommanderServer(conf CommanderHTTPServerConfig) (*CommanderHTTPServer, error) {
+func NewCommanderServer(conf CommanderConfig) (*CommanderHTTPServer, error) {
 	funcStorage, err := NewFSFunctionStorage(conf.FuncStorageRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize function storage: %w", err)

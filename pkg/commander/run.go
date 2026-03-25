@@ -17,22 +17,32 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	otelchimetric "github.com/riandyrn/otelchi/metric"
+	grpc "google.golang.org/grpc"
 )
 
-func Run(ctx context.Context, conf CommanderHTTPServerConfig) error {
+type CommanderConfig struct {
+	AppName string
+	Env     string
+
+	Host     string
+	HttpPort string
+	GrpcPort string
+
+	DbURI           string
+	FuncStorageRoot AbsolutePath
+}
+
+func (c CommanderConfig) GrpcAddr() string {
+	return net.JoinHostPort(c.Host, c.GrpcPort)
+}
+
+func Run(ctx context.Context, conf CommanderConfig) error {
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	srv, err := NewCommanderServer(conf)
-	if err != nil {
-		slog.Error("failed to initialize server", "error", err)
-		return fmt.Errorf("server initialization failed: %w", err)
-	}
-
 	monitoringOpts := server.MonitoringOpts{
-		Env:        conf.Env,
-		AppName:    conf.AppName,
-		AppVersion: conf.CommitHash,
+		Env:     conf.Env,
+		AppName: conf.AppName,
 	}
 
 	otelCfg, otelShutdown, err := server.InitHttpOTEL(ctx, monitoringOpts)
@@ -41,38 +51,30 @@ func Run(ctx context.Context, conf CommanderHTTPServerConfig) error {
 		return fmt.Errorf("OTEL initialization failed: %w", err)
 	}
 
-	r := chi.NewMux()
-	r.Use(middleware.Heartbeat(server.HeartbeatEndpoint))
-
-	handler := api.HandlerWithOptions(srv, api.ChiServerOptions{
-		BaseURL:          conf.BaseURL,
-		BaseRouter:       r,
-		Middlewares:      createMiddleware(otelCfg, monitoringOpts),
-		ErrorHandlerFunc: server.ErrorHandlerFunc,
-	})
-
-	httpServer := &http.Server{
-		Addr:    net.JoinHostPort(conf.Host, conf.Port),
-		Handler: handler,
+	httpCloser, httpErrCh, err := runHttp(conf, otelCfg, monitoringOpts)
+	if err != nil {
+		slog.Error("failed to start http server", "error", err)
+		return fmt.Errorf("http server failed: %w", err)
 	}
 
-	errCh := make(chan error, 1)
-
-	go func() {
-		slog.Info("starting server", "addr", httpServer.Addr)
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			errCh <- err
-		}
-		close(errCh)
-	}()
+	grpcCloser, grpcErrCh, err := runGrpc(ctx, conf, monitoringOpts)
+	if err != nil {
+		slog.Error("failed to start grpc server", "error", err)
+		return fmt.Errorf("http server failed: %w", err)
+	}
 
 	select {
 	case <-ctx.Done():
 		slog.Info("interrupt received, shutting down server")
-	case err := <-errCh:
+	case err := <-httpErrCh:
 		if err != nil {
 			slog.Error("http server failed", "error", err)
 			return fmt.Errorf("http server failed: %w", err)
+		}
+	case err := <-grpcErrCh:
+		if err != nil {
+			slog.Error("grpc server failed", "error", err)
+			return fmt.Errorf("grpc server failed: %w", err)
 		}
 	}
 
@@ -80,9 +82,88 @@ func Run(ctx context.Context, conf CommanderHTTPServerConfig) error {
 	defer shutdownCancel()
 
 	return errors.Join(
-		httpServer.Shutdown(shutdownCtx),
+		httpCloser(shutdownCtx),
+		grpcCloser(shutdownCtx),
 		otelShutdown(shutdownCtx),
 	)
+}
+
+func runHttp(
+	conf CommanderConfig,
+	otelCfg otelchimetric.BaseConfig,
+	monitoringOpts server.MonitoringOpts,
+) (func(context.Context) error, chan error, error) {
+	srv, err := NewCommanderServer(conf)
+	if err != nil {
+		slog.Error("failed to initialize server", "error", err)
+		return nil, nil, fmt.Errorf("server initialization failed: %w", err)
+	}
+
+	r := chi.NewMux()
+	r.Use(middleware.Heartbeat(server.HeartbeatEndpoint))
+
+	handler := api.HandlerWithOptions(srv, api.ChiServerOptions{
+		BaseRouter:       r,
+		Middlewares:      createMiddleware(otelCfg, monitoringOpts),
+		ErrorHandlerFunc: server.ErrorHandlerFunc,
+	})
+
+	httpServer := &http.Server{
+		Addr:    net.JoinHostPort(conf.Host, conf.HttpPort),
+		Handler: handler,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		slog.Info("commander starting http server", "addr", httpServer.Addr)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- err
+		}
+		close(errCh)
+	}()
+
+	closer := func(ctx context.Context) error {
+		return httpServer.Shutdown(ctx)
+	}
+
+	return closer, errCh, nil
+}
+
+func runGrpc(
+	ctx context.Context,
+	conf CommanderConfig,
+	monitoringOpts server.MonitoringOpts,
+) (func(context.Context) error, chan error, error) {
+	commanderGrpc, grpcCloser, err := newCommanderGrpcServer(ctx, conf, monitoringOpts)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to initialize runner: %w", err)
+	}
+
+	lis, err := net.Listen("tcp", conf.GrpcAddr())
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to listen on addr %q: %w", conf.GrpcAddr(), err)
+	}
+	// lis.Close by the grpcServer
+
+	grpcServer := server.InstrumentedGrpcServer(monitoringOpts)
+	RegisterCommanderServer(grpcServer, commanderGrpc)
+
+	errCh := make(chan error, 1)
+	go func() {
+		slog.Info("commander starting grpc server", "addr", conf.GrpcAddr())
+		if err := grpcServer.Serve(lis); err != nil && err != grpc.ErrServerStopped {
+			errCh <- fmt.Errorf("grpc server failed to serve: %w", err)
+		}
+		close(errCh)
+	}()
+
+	closer := func(context.Context) error {
+		grpcServer.GracefulStop()
+		grpcCloser()
+		return nil
+	}
+
+	return closer, errCh, nil
 }
 
 func createMiddleware(
