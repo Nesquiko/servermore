@@ -44,3 +44,7 @@ func (c *commanderGrpcServer) RouteFunction(
 ) (*RouteFunctionResponse, error) {
 	panic("unimplemented")
 }
+
+type RoutingCache interface {
+	FunctionIdInstances(ctx context.Context, funcId string)
+}

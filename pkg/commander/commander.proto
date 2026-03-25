@@ -17,7 +17,7 @@ message RegisterRunnerResponse {
 }
 
 message RouteFunctionRequest {
-  int64 function_id = 1;
+  string function_id = 1;
 }
 
 message RouteFunctionResponse {
