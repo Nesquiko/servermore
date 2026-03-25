@@ -27,17 +27,9 @@ description = "Runs all the test in repo"
 usage = '''
 flag "--count <count>" help="How many times to run tests" default="1"
 '''
-depends = ['test-setup']
-run = 'go test -v ${usage_count:+-count ${usage_count}} ./...'
-
-[tasks.test-setup]
-description = "Common test setup."
-hide = true
-depends = ['build']
 run = [
 	'go build -o ./tmp/testing-guest ./test/testing-guest',
-	'sqlc -f ./test/test_utils/sqlc.yaml compile',
-	'sqlc -f ./test/test_utils/sqlc.yaml generate',
+	'go test -v ${usage_count:+-count ${usage_count}} ./...',
 ]
 
 [tasks.test-by-name]
@@ -59,7 +51,9 @@ run = 'migrate create -dir ./db/migrations -ext sql ${usage_migration_name}'
 description = "Runs sqlc to generate Go code for queries"
 run = [
 	'sqlc -f ./pkg/commander/sqlc.yaml compile',
-	'sqlc -f ./pkg/commander/sqlc.yaml generate'
+	'sqlc -f ./pkg/commander/sqlc.yaml generate',
+	'sqlc -f ./test/test_utils/sqlc.yaml compile',
+	'sqlc -f ./test/test_utils/sqlc.yaml generate',
 ]
 
 [tasks.openapi-generate]
