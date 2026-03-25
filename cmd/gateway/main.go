@@ -8,8 +8,7 @@ import (
 
 	"github.com/Nesquiko/servermore/pkg/server"
 	"github.com/go-chi/chi/v5"
-	"github.com/riandyrn/otelchi"
-	otelchimetric "github.com/riandyrn/otelchi/metric"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 const FunctionIdPathParam = "functionId"
@@ -35,14 +34,8 @@ func main() {
 	r := chi.NewRouter()
 	baseUrl := fmt.Sprintf("/{%s}", FunctionIdPathParam)
 
-	r.Use(
-		server.CreateHTTPLogger(opts),
-		otelchi.Middleware(opts.AppName, otelchi.WithChiRoutes(r)),
-		otelchimetric.NewRequestDurationMillis(otelCfg),
-		otelchimetric.NewRequestInFlight(otelCfg),
-		otelchimetric.NewResponseSizeBytes(otelCfg),
-	)
-
+	r.Use(middleware.Heartbeat(server.HeartbeatEndpoint))
+	r.Use(server.HttpMiddleware(otelCfg, opts)...)
 	r.Route(baseUrl, func(r chi.Router) {
 		r.Post("/", processFunctionRequest)
 		r.Post("/*", processFunctionRequest)
