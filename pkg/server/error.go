@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	commonapi "github.com/Nesquiko/servermore/pkg/api/common"
@@ -71,7 +72,9 @@ func ErrorHandlerFunc(w http.ResponseWriter, r *http.Request, err error) {
 
 func EncodeApiError(w http.ResponseWriter, r *http.Request, err *ApiError) {
 	SetAPIError(r, err)
-	encodeWithContentType(w, err.Status, err.ErrorDetail)
+	if err := encodeWithContentType(w, err.Status, err.ErrorDetail); err != nil {
+		slog.Error("encodeWithContentType failed", "error", err)
+	}
 }
 
 const (

@@ -87,7 +87,7 @@ func TestMain(m *testing.M) {
 		slog.Error("commander exited before becoming ready")
 		os.Exit(1)
 	case err = <-errCh:
-		if err := eg.Wait(); err != nil {
+		if err != nil {
 			slog.Error("commander http/grpc server is not ready", "error", err)
 			os.Exit(1)
 		}
@@ -114,7 +114,7 @@ func newCommanderClient(t *testing.T) commander.CommanderClient {
 	conn, err := server.LoggingGrpcClient(GrcpServerUrl, monitoringOpts)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		server.CloseConn(conn)
+		server.Close(conn)
 	})
 
 	return commander.NewCommanderClient(conn)

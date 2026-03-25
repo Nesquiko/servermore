@@ -127,7 +127,7 @@ func (c *CommanderHTTPServer) DownloadFunctionBinary(
 		server.InternalServerError(w, r, fmt.Errorf("open function binary: %w", err))
 		return
 	}
-	defer file.Close()
+	defer server.Close(file)
 
 	w.Header().Set(DownloadHeaderFunctionID, strconv.FormatInt(function.ID, 10))
 	w.Header().Set(DownloadHeaderFunctionFilename, filepath.Base(function.Path))

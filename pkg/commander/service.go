@@ -9,6 +9,7 @@ import (
 
 	api "github.com/Nesquiko/servermore/pkg/api/commander"
 	queries "github.com/Nesquiko/servermore/pkg/commander/queries.gen"
+	"github.com/Nesquiko/servermore/pkg/server"
 )
 
 type CommanderService struct {
@@ -34,7 +35,7 @@ func (svc *CommanderService) CreateFunction(
 	if err != nil {
 		return api.Function{}, fmt.Errorf("reading function bytes failed: %w", err)
 	}
-	defer funcBytesReader.Close()
+	defer server.Close(funcBytesReader)
 
 	hash := BytesSha256(funcBytes)
 

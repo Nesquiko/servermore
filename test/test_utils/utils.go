@@ -40,7 +40,7 @@ func RandomFreePort() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("listen for random port: %w", err)
 	}
-	defer listener.Close()
+	defer server.Close(listener)
 
 	tcpAddr, ok := listener.Addr().(*net.TCPAddr)
 	if !ok {
@@ -101,10 +101,10 @@ func WaitForHttpReadyWithTiming(
 				"server.label", serverLabel,
 				"time", time.Since(startTime),
 			)
-			resp.Body.Close()
+			server.Close(resp.Body)
 			return nil
 		}
-		resp.Body.Close()
+		defer server.Close(resp.Body)
 
 		select {
 		case <-ctx.Done():
@@ -143,7 +143,7 @@ func WaitForGrpcReadyWithTiming(
 	if err != nil {
 		return fmt.Errorf("failed to initialize grpc connection: %w", err)
 	}
-	defer server.CloseConn(conn)
+	defer server.Close(conn)
 	conn.Connect()
 
 	for {

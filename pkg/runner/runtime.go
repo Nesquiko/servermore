@@ -82,7 +82,7 @@ func (n *nativeRuntime) Start(
 
 	readyErr := <-readyCh
 	if readyErr != nil {
-		server.CloseConn(conn)
+		server.Close(conn)
 		closeCmd(instanceCmd)
 		meta.StartTook = time.Since(startTime)
 		return fmt.Errorf(
@@ -111,7 +111,7 @@ func (n *nativeRuntime) Invoke(
 
 // Stop implements [FunctionRuntime].
 func (n *nativeRuntime) Stop() {
-	server.CloseConn(n.conn, slog.String("addr", n.addr))
+	server.Close(n.conn, slog.String("addr", n.addr))
 	closeCmd(n.cmd)
 }
 
@@ -121,7 +121,7 @@ func FreePort() (port int, err error) {
 	if a, err = net.ResolveTCPAddr("tcp", "localhost:0"); err == nil {
 		var l *net.TCPListener
 		if l, err = net.ListenTCP("tcp", a); err == nil {
-			defer l.Close()
+			defer server.Close(l)
 			return l.Addr().(*net.TCPAddr).Port, nil
 		}
 	}

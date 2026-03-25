@@ -100,7 +100,7 @@ func newRunnerClientWithLog(t *testing.T, logLevel slog.Level) runner.RunnerClie
 	conn, err := server.LoggingGrpcClient(ServerUrl, monitoringOpts)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		server.CloseConn(conn)
+		server.Close(conn)
 	})
 
 	return runner.NewRunnerClient(conn)

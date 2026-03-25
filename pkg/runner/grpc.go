@@ -75,9 +75,7 @@ func newRunnerGrpcServer(
 		return nil, nil, fmt.Errorf("failed to initialize grpc commander client: %w", err)
 	}
 	closer := func() {
-		if err := conn.Close(); err != nil {
-			slog.Error("failed to close grpc commander connection", "error", err)
-		}
+		server.Close(conn)
 	}
 
 	client := commander.NewCommanderClient(conn)
@@ -327,7 +325,7 @@ func (r *runnerGrpcServer) downloadFunction(
 	if err != nil {
 		return "", 0, 0, fmt.Errorf("download function id '%s' failed: %w", functionId, err)
 	}
-	defer resp.Body.Close()
+	defer server.Close(resp.Body)
 
 	switch resp.StatusCode {
 	case http.StatusNotFound:

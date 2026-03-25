@@ -36,7 +36,7 @@ func TestCreateFunction_Created(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err, "send request")
-	defer resp.Body.Close()
+	defer server.Close(resp.Body)
 
 	assert.Equal(t, http.StatusCreated, resp.StatusCode)
 
@@ -78,7 +78,7 @@ func TestCreateFunction_ConflictOnDuplicate(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err, "send first request")
-	defer resp.Body.Close()
+	defer server.Close(resp.Body)
 	require.Equal(t, http.StatusCreated, resp.StatusCode, "first upload should succeed")
 
 	bodyFile2, contentType2 := createFunctionMultipartBodyFromBytes(
@@ -94,7 +94,7 @@ func TestCreateFunction_ConflictOnDuplicate(t *testing.T) {
 
 	resp2, err := http.DefaultClient.Do(req2)
 	require.NoError(t, err, "send second request")
-	defer resp2.Body.Close()
+	defer server.Close(resp2.Body)
 
 	assert.Equal(t, http.StatusConflict, resp2.StatusCode)
 
@@ -124,7 +124,7 @@ func TestCreateFunction_BadRequestWhenTooLarge(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err, "send request")
-	defer resp.Body.Close()
+	defer server.Close(resp.Body)
 
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 
@@ -148,7 +148,7 @@ func TestCreateFunction_BadRequestWhenMultipartMalformed(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err, "send malformed request")
-	defer resp.Body.Close()
+	defer server.Close(resp.Body)
 
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 
@@ -180,7 +180,7 @@ func TestCreateFunction_BadRequestWhenBinaryMissing(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err, "send request")
-	defer resp.Body.Close()
+	defer server.Close(resp.Body)
 
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 

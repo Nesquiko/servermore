@@ -1,16 +1,26 @@
 [tools]
 go = "1.26.0"
-air = "1.64.5"
-"aqua:golang-migrate/migrate" = "4.19.1"
 sqlc = "v1.30.0"
 oapi-codegen = "v2.6.0"
 protoc = "34.0"
 protoc-gen-go = "1.36.11"
 protoc-gen-go-grpc = "1.6.1"
 
+air = "1.64.5"
+golangci-lint = "2.11.4"
+"aqua:golang-migrate/migrate" = "4.19.1"
+
 [tasks.build]
+description = "Generates necessary source files and checks if everything is correct."
 depends = ['sqlc-generate', 'openapi-generate', 'grpc-generate']
 run = 'go build ./...'
+
+[tasks.lint]
+description = "Runs static analysis on the project."
+run = [
+	'golangci-lint fmt -d',
+	'golangci-lint run'
+]
 
 [tasks.test]
 description = "Runs all the test in repo"

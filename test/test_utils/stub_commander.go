@@ -216,7 +216,7 @@ func (s *StubCommander) DownloadFunctionBinary(
 		return
 	}
 
-	defer file.Close()
+	defer server.Close(file)
 	w.Header().Set(commander.DownloadHeaderFunctionID, funcId)
 	w.Header().Set(commander.DownloadHeaderFunctionFilename, filepath.Base(path))
 	w.Header().Set(commander.DownloadHeaderFunctionPath, filepath.Dir(path))

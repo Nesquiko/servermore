@@ -169,7 +169,7 @@ func TestInvokeFunctionInstance_UnknownInstanceID(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Nil(t, invokeResp)
-	assert.ErrorAs(t, err, &runner.UnknownInstanceErr)
+	assert.ErrorAs(t, err, &runner.ErrUnknownInstance)
 }
 
 func TestInvokeFunctionInstance_ConcurrentRequestsReuseSamePreparedInstance(t *testing.T) {
@@ -249,7 +249,7 @@ func TestInvokeFunctionInstance_AfterInstanceShutdownReturnsError(t *testing.T) 
 	})
 	require.Error(t, err)
 	assert.Nil(t, invokeResp)
-	assert.ErrorAs(t, err, &runner.UnknownInstanceErr)
+	assert.ErrorAs(t, err, &runner.ErrUnknownInstance)
 }
 
 func TestPrepareFunctionInstance_SequentialPreparesCreateDistinctInstances(t *testing.T) {

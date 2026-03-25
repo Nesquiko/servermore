@@ -41,12 +41,22 @@ func main() {
 		r.Post("/*", processFunctionRequest)
 	})
 
-	http.ListenAndServe(":42069", r)
+	if err := http.ListenAndServe(":42069", r); err != nil && err != http.ErrServerClosed {
+		slog.Error("gateway failed with error", "error", err)
+	}
 }
 
 func processFunctionRequest(w http.ResponseWriter, r *http.Request) {
 	functionId := chi.URLParam(r, FunctionIdPathParam)
 	rest := chi.URLParam(r, "*")
 
-	fmt.Fprintf(w, "hi, you are calling function '%s' with endpoint '%s'", functionId, rest)
+	_, err := fmt.Fprintf(
+		w,
+		"hi, you are calling function '%s' with endpoint '%s'",
+		functionId, rest,
+	)
+	if err != nil {
+		slog.Error("processFunctionRequest errored when encoding response", "error", err)
+		server.InternalServerError(w, r, err)
+	}
 }

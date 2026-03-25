@@ -77,7 +77,7 @@ func Run(ctx context.Context, conf RunnerConfig) error {
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
 
-		otelShutdown(shutdownCtx)
+		server.CloseWithCtx(shutdownCtx, otelShutdown)
 		return nil
 	case err := <-errCh:
 		runnerCloser()

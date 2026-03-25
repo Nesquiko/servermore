@@ -156,7 +156,7 @@ func (is *InstancesStates) QueueDepths() map[string]uint32 {
 	return depths
 }
 
-var UnknownInstanceErr = errors.New("unknown instance id")
+var ErrUnknownInstance = errors.New("unknown instance id")
 
 // Invoke returns boolean indicating if instance is running, or error, caller
 // must handle different cases:
@@ -170,7 +170,7 @@ func (is *InstancesStates) InstanceState(instanceId uuid.UUID) (bool, *instanceS
 	is.instanceStatesMu.RUnlock()
 
 	if !ok {
-		return false, nil, UnknownInstanceErr
+		return false, nil, ErrUnknownInstance
 	}
 
 	if instance.opened.CompareAndSwap(false, true) {
