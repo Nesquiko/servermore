@@ -45,6 +45,7 @@ type instanceState struct {
 	opened atomic.Bool
 
 	lastUsedTimer         *time.Timer
+	lastUsedTimerEnd      time.Time
 	instanceShutdownAfter time.Duration
 
 	workerCtx    context.Context
@@ -53,6 +54,7 @@ type instanceState struct {
 
 func (is *instanceState) ResetTimer() {
 	resetted := is.lastUsedTimer.Reset(is.instanceShutdownAfter)
+	is.lastUsedTimerEnd = time.Now().Add(is.instanceShutdownAfter)
 	assert.That(resetted, "calling ResetTimer on already triggered timer")
 }
 
@@ -138,6 +140,7 @@ func (is *InstancesStates) Submit(
 		opened:                atomic.Bool{},
 		instanceShutdownAfter: shutdownAfter,
 		lastUsedTimer:         time.NewTimer(shutdownAfter),
+		lastUsedTimerEnd:      time.Now().Add(shutdownAfter),
 		workerCtx:             workerCtx,
 		workerCancel:          workerCancelCtx,
 	}
@@ -147,11 +150,15 @@ func (is *InstancesStates) Submit(
 }
 
 // QueueDepths reads the lengths of queues WITHOUGH LOCKING to not slowdown
-// the request processing, it is OK that it returns not precise data
-func (is *InstancesStates) QueueDepths() map[string]uint32 {
+// the request processing, it is OK that it returns not precise data.
+// Filters out instances which will in end in the gracePeriod duration
+func (is *InstancesStates) QueueDepths(gracePeriod time.Duration) map[string]uint32 {
 	depths := make(map[string]uint32)
-	for k, v := range is.instanceStates {
-		depths[k.String()] = uint32(len(v.queue))
+	for id, instance := range is.instanceStates {
+		if instance.lastUsedTimerEnd.Sub(time.Now()) < gracePeriod {
+			continue
+		}
+		depths[id.String()] = uint32(len(instance.queue))
 	}
 	return depths
 }

@@ -20,6 +20,7 @@ var (
 	TestRunnerStorageRoot     string
 	StubCommander             *testutils.StubCommander
 	TestInstanceShutdownAfter time.Duration = 2 * time.Second
+	TestInstanceGracePeriod   time.Duration = 500 * time.Millisecond
 )
 
 func TestMain(m *testing.M) {
@@ -44,6 +45,7 @@ func TestMain(m *testing.M) {
 		CommanderGrpcPort:     StubCommander.GrpcPort(),
 		CommanderHttpPort:     StubCommander.HttpPort(),
 		InstanceShutdownAfter: TestInstanceShutdownAfter,
+		InstanceGracePeriod:   TestInstanceGracePeriod,
 		FuncStorageRoot:       TestRunnerStorageRoot,
 	}
 

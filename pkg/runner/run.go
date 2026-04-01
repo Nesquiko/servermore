@@ -26,6 +26,7 @@ type RunnerConfig struct {
 	CommanderGrpcPort string
 
 	InstanceShutdownAfter time.Duration
+	InstanceGracePeriod   time.Duration
 	FuncStorageRoot       string
 }
 
