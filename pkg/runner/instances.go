@@ -155,7 +155,7 @@ func (is *InstancesStates) Submit(
 func (is *InstancesStates) QueueDepths(gracePeriod time.Duration) map[string]uint32 {
 	depths := make(map[string]uint32)
 	for id, instance := range is.instanceStates {
-		if instance.lastUsedTimerEnd.Sub(time.Now()) < gracePeriod {
+		if time.Until(instance.lastUsedTimerEnd) < gracePeriod {
 			continue
 		}
 		depths[id.String()] = uint32(len(instance.queue))
