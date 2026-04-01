@@ -101,12 +101,38 @@ func TestHeartbeat_ReportsQueuedInvocationsForRunningInstance(t *testing.T) {
 	}
 }
 
-func TestHeartbeat_DoesNotReportStoppedInstanceAfterShutdownTimeout(t *testing.T) {
+func TestHeartbeat_DoesNotReportInstanceInGracePeriod(t *testing.T) {
 	t.Parallel()
 
 	client := newRunnerClient(t)
 
 	functionID := testutils.AddRandomPart("303")
+	functionFilename := functionID
+
+	binaryPath, err := filepath.Abs(testutils.TestingBinaryPath)
+	require.NoError(t, err)
+
+	StubCommander.DeleteFile(functionFilename)
+	StubCommander.SymlinkFile(binaryPath, functionFilename)
+	functionPath := StubCommander.PathFor(functionFilename)
+
+	prepareResp, err := prepareFunctionInstance(t, client, functionID, functionPath)
+	require.NoError(t, err)
+	require.NotEmpty(t, prepareResp.GetInstanceId())
+
+	time.Sleep(TestInstanceShutdownAfter - TestInstanceGracePeriod)
+
+	heartbeatResp, err := client.Heartbeat(t.Context(), nil)
+	require.NoError(t, err)
+	assert.NotContains(t, heartbeatResp.GetQueueDepths(), prepareResp.GetInstanceId())
+}
+
+func TestHeartbeat_DoesNotReportStoppedInstanceAfterShutdownTimeout(t *testing.T) {
+	t.Parallel()
+
+	client := newRunnerClient(t)
+
+	functionID := testutils.AddRandomPart("304")
 	functionFilename := functionID
 
 	binaryPath, err := filepath.Abs(testutils.TestingBinaryPath)

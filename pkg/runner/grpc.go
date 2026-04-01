@@ -33,6 +33,7 @@ type runnerGrpcServer struct {
 	downloadsStorageRoot string
 
 	instanceShutdownAfter time.Duration
+	instanceGracePeriod   time.Duration
 
 	monitoringOpts server.MonitoringOpts
 }
@@ -94,6 +95,7 @@ func newRunnerGrpcServer(
 		instances:             NewInstanceStates(),
 		downloads:             NewDownloadsSyncMap(),
 		instanceShutdownAfter: conf.InstanceShutdownAfter,
+		instanceGracePeriod:   conf.InstanceGracePeriod,
 		monitoringOpts:        monitoringOpts,
 		downloadsStorageRoot:  conf.FuncStorageRoot,
 	}, closer, nil
@@ -104,7 +106,7 @@ func (r *runnerGrpcServer) Heartbeat(
 	context.Context,
 	*HeartbeatRequest,
 ) (*HeartbeatResponse, error) {
-	depths := r.instances.QueueDepths()
+	depths := r.instances.QueueDepths(r.instanceGracePeriod)
 	return &HeartbeatResponse{QueueDepths: depths}, nil
 }
 
