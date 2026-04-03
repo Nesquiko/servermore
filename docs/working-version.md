@@ -1,6 +1,6 @@
 # Working version
 
-The working version of our serverless platform as of 3.4.2026 and git tag `v0.1.0`.
+The working version of our serverless platform as of 3.4.2026 and git tag `v0.1.1`.
 This version is simple and focuses mainly on getting the request flow implemented.
 Due to this there are certain features that such a platform should have but does not:
 
