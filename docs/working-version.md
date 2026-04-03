@@ -12,6 +12,19 @@ Due to this there are certain features that such a platform should have but does
   to this new runtimes can be added and will work without modifying anything else
   if they adhere to the gRPC network interface.
 
+## What you can run
+
+You can download [mise](https://mise.jdx.dev/getting-started.html), which is tool management,
+and task runner (something like Make but for 21st century).
+
+After downloading it, run `mise install` to download necessary tools, and then
+run `mise test`. This command will run all the tests in the project, which includes:
+
+- small unit tests,
+- `Commander` integration tests which test its HTTP API for uploading new function binaries (`test/commander/create_function_test.go`),
+- `Runner` integration tests which test ist gRPC API for heartbeats (`test/runner/heartbeat_test.go`),
+  preparing function instances (`test/runner/prepare_test.go`) and invoking function instances (`test/runner/invoke_test.go`).
+
 ## Implemented
 
 The whole request flow, as documented in project's README.md, is not yet implemented.
