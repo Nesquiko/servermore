@@ -4,8 +4,9 @@ Servermore is a simplified serverless platform written in Go.
 
 ## DEV setup
 
-This project uses [mise](https://mise.jdx.dev/) for tool management. Install
-it and run `mise install`. You have everything you need for the project (hopefully).
+This project uses [mise](https://mise.jdx.dev/getting-started.html) for tool management.
+Install it and run `mise install`. You have everything you need for the project,
+confirm it by running `mise test` which builds the project and runs tests.
 
 ## Overview
 
@@ -19,23 +20,54 @@ The system is split into four components:
 ## Tech Stack
 
 - Go
-- SQLite behind an interface with `sqlc`
-- Valkey
+- SQLite behind an interface generated with `sqlc`
 - gRPC for internal communication
-- HTTP for public ingress through `gateway`
-- env vars and YAML config
-- `slog` for logging
+- HTTP for public ingress defined through OpenAPI
+- `slog` for structured logging
+- Valkey
 
 ## Request Flow
 
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant G as Gateway
+    participant Cmd as Commander
+    participant R as Runner
+    participant Guest as Guest
+
+    C->>G: HTTP request /{function_id}/...
+    G->>G: Extract function_id<br/>Strip first path segment
+    G->>Cmd: RouteFunction(function_id)
+    alt Existing healthy instance available
+        Cmd-->>G: runner_addr, instance_id
+    else No instance or overloaded
+        Cmd->>R: PrepareFunctionInstance(function_id)
+        R->>Cmd: Download binary if needed
+        R->>R: Start Guest instance
+        R-->>Cmd: instance_id
+        Cmd-->>G: runner_addr, instance_id
+    end
+    G->>R: InvokeFunctionInstance(instance_id, request)
+    R->>Guest: gRPC invocation
+    Guest-->>R: Invocation response
+    R-->>G: Invocation response
+    G-->>C: HTTP response
+```
+
 1. A client sends an HTTP request to `Gateway`.
-2. The first path segment is the `function_id`.
+2. The first path segment must be the `function_id`.
 3. `Gateway` strips that `function_id` from the forwarded request path.
 4. `Gateway` asks `Commander` where the request should go.
-5. `Commander` selects a `Runner` and a concrete `instance_id`.
-6. `Gateway` sends the invocation to that `Runner`.
-7. `Runner` forwards the normalized invocation to the selected `Guest` over gRPC.
-8. The response goes back through `Runner` and `Gateway` to the client.
+5. `Commander` routes the function request:
+   - if an instance of a function is already running on some `Runner`, and is
+     not overloaded, route to that `instance_id`.
+   - if no instance is running, or is overloaded, `Commander` requests a
+     `Runner` to prepare an instance for that function and routes to the new `instance_id`.
+6. `Commander` returns to `Gateway` the runner address and the `instance_id`.
+7. `Gateway` sends the invocation to that `Runner` with `instance_id`.
+8. `Runner` forwards the invocation to the selected `Guest` over gRPC.
+9. The response goes back through `Runner` and `Gateway` to the client.
 
 ## Responsibilities
 
@@ -44,33 +76,32 @@ The system is split into four components:
 - exposes the public HTTP API
 - extracts `function_id` from the path
 - normalizes incoming HTTP requests
-- propagates tracing context
 - asks `Commander` to route each request
 - invokes the selected `Runner`
-- retries once when routing is stale
 
 ### Commander
 
 - stores functions, runners, and routing state
-- receives runner registration and pings
-- schedules new instances
-- resolves requests to a concrete `runner` + `instance_id`
+- receives runner registration and pulls runner heartbeats
+- prepares new instances
+- routes requests to a concrete `runner` + `instance_id`
 - tracks load and queue depth
 - avoids routing to unavailable runners
+- provides a HTTP API for downloading function binaries
 
 ### Runner
 
-- exposes a gRPC API to `Commander`
+- exposes a gRPC API
 - prepares function instances on demand
+- if needed, downloads function binaries
 - starts and stops guest processes
-- waits for guest readiness
 - invokes guests over gRPC
-- reports queue depth and liveness to `Commander`
+- heartbeat with queue depth and resource utilization
 
 ### Guest
 
 - is the user function process
 - runs as a long-lived gRPC server
 - receives normalized invocation requests
-- returns normalized invocation responses
+- returns invocation responses
 - is started through the guest SDK
