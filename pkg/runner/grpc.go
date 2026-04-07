@@ -35,7 +35,8 @@ type runnerGrpcServer struct {
 	instanceShutdownAfter time.Duration
 	instanceGracePeriod   time.Duration
 
-	monitoringOpts server.MonitoringOpts
+	monitoringOpts   server.MonitoringOpts
+	metricsCollector *MetricsCollector
 }
 
 var _ RunnerServer = (*runnerGrpcServer)(nil)
@@ -98,6 +99,7 @@ func newRunnerGrpcServer(
 		instanceGracePeriod:   conf.InstanceGracePeriod,
 		monitoringOpts:        monitoringOpts,
 		downloadsStorageRoot:  conf.FuncStorageRoot,
+		metricsCollector:      NewMetricsCollector(),
 	}, closer, nil
 }
 
@@ -107,7 +109,12 @@ func (r *runnerGrpcServer) Heartbeat(
 	*HeartbeatRequest,
 ) (*HeartbeatResponse, error) {
 	depths := r.instances.QueueDepths(r.instanceGracePeriod)
-	return &HeartbeatResponse{QueueDepths: depths}, nil
+	metrics := r.metricsCollector.Collect()
+	return &HeartbeatResponse{
+		QueueDepths: depths,
+		CpuPercent:  metrics.CPUPercent,
+		MemoryBytes: metrics.MemoryBytes,
+	}, nil
 }
 
 // PrepareFunctionInstance implements [RunnerServer].
