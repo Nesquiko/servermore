@@ -109,11 +109,14 @@ func (r *runnerGrpcServer) Heartbeat(
 	*HeartbeatRequest,
 ) (*HeartbeatResponse, error) {
 	depths := r.instances.QueueDepths(r.instanceGracePeriod)
-	metrics := r.metricsCollector.Collect()
+	metrics, err := r.metricsCollector.Collect()
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect metrics: %w", err)
+	}
 	return &HeartbeatResponse{
-		QueueDepths: depths,
-		CpuPercent:  metrics.CPUPercent,
-		MemoryBytes: metrics.MemoryBytes,
+		QueueDepths:        depths,
+		CpuPercent:         metrics.CPUPercent,
+		UnusedMemoryBytes:  metrics.UnusedMemoryBytes,
 	}, nil
 }
 
