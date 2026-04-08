@@ -8,13 +8,20 @@ import (
 	"io"
 
 	api "github.com/Nesquiko/servermore/pkg/api/commander"
+	"github.com/Nesquiko/servermore/pkg/assert"
 	queries "github.com/Nesquiko/servermore/pkg/commander/queries.gen"
+	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
+	"google.golang.org/grpc"
 )
+
+type CommanderServiceConfig struct{}
 
 type CommanderService struct {
 	db          CommanderDB
 	funcStorage *FileSystemFunctionStorage
+
+	runnerClientOpts server.MonitoringOpts
 }
 
 var (
@@ -22,8 +29,12 @@ var (
 	ErrFunctionNotFound = errors.New("function not found")
 )
 
-func NewCommanderService(db CommanderDB, funcStorage *FileSystemFunctionStorage) *CommanderService {
-	return &CommanderService{db: db, funcStorage: funcStorage}
+func NewCommanderService(
+	db CommanderDB,
+	funcStorage *FileSystemFunctionStorage,
+	runnerClientOpts server.MonitoringOpts,
+) *CommanderService {
+	return &CommanderService{db: db, funcStorage: funcStorage, runnerClientOpts: runnerClientOpts}
 }
 
 func (svc *CommanderService) CreateFunction(
@@ -71,4 +82,81 @@ func (svc *CommanderService) FunctionByID(ctx context.Context, id int64) (querie
 	}
 
 	return function, nil
+}
+
+func (svc *CommanderService) RegisterRunner(
+	ctx context.Context,
+	addr string,
+) (queries.Runner, error) {
+	meta := server.GetRegisterRunnerMeta(ctx)
+	assert.That(meta != nil, "no register runner meta set in ctx")
+	meta.RunnerAddr = addr
+
+	run, err := svc.db.RunnerByAddr(ctx, addr)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return svc.persistNewRunner(ctx, addr)
+	} else if err != nil {
+		return queries.Runner{}, fmt.Errorf("querying runner by addr failed: %w", err)
+	}
+	meta.RunnerID = run.ID
+	meta.PreexistingRunner = true
+
+	return run, nil
+}
+
+// persistNewRunner tries to call heartbeat on the provided address,
+// if it succeds then persists new runner.
+func (svc *CommanderService) persistNewRunner(
+	ctx context.Context,
+	addr string,
+) (queries.Runner, error) {
+	meta := server.GetRegisterRunnerMeta(ctx)
+	if meta != nil {
+		meta.RunnerAddr = addr
+	}
+
+	runnerClient, conn, err := newRunnerClient(addr, svc.runnerClientOpts)
+	if err != nil {
+		return queries.Runner{}, fmt.Errorf("initializing runner at %q failed: %w", addr, err)
+	}
+	defer server.Close(conn)
+
+	_, err = runnerClient.Heartbeat(ctx, &runnergrpc.HeartbeatRequest{})
+	if err != nil {
+		return queries.Runner{}, fmt.Errorf("runner at %q heartbeat failed: %w", addr, err)
+	}
+	if meta != nil {
+		meta.RunnerHeartbeatOK = true
+	}
+
+	runn, err := svc.db.CreateRunner(ctx, addr)
+	if err != nil {
+		return queries.Runner{}, fmt.Errorf("failed to save runner at %q: %w", addr, err)
+	}
+	if meta != nil {
+		meta.RunnerID = runn.ID
+	}
+
+	return runn, nil
+}
+
+func newRunnerClient(
+	addr string,
+	monitoringOpts server.MonitoringOpts,
+) (runnergrpc.RunnerClient, *grpc.ClientConn, error) {
+	opts := server.MonitoringOpts{
+		Env:             monitoringOpts.Env,
+		AppName:         fmt.Sprintf("%s-runner-client-%s", monitoringOpts.AppName, addr),
+		AppVersion:      monitoringOpts.AppName,
+		AdditionalAttrs: monitoringOpts.AdditionalAttrs,
+		Level:           monitoringOpts.Level,
+		OTELOn:          monitoringOpts.OTELOn,
+	}
+	conn, err := server.LoggingGrpcClient(addr, opts)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create runner client for address %q: %w", addr, err)
+	}
+
+	return runnergrpc.NewRunnerClient(conn), conn, nil
 }

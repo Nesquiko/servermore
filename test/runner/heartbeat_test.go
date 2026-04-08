@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Nesquiko/servermore/pkg/runner"
+	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	testutils "github.com/Nesquiko/servermore/test/test_utils"
 	testingguestconsts "github.com/Nesquiko/servermore/test/testing-guest/consts"
 	"github.com/stretchr/testify/assert"
@@ -63,7 +63,7 @@ func TestHeartbeat_ReportsQueuedInvocationsForRunningInstance(t *testing.T) {
 	require.NotEmpty(t, prepareResp.GetInstanceId())
 
 	requestsCount := 5
-	responses := make([]*runner.InvokeInstanceResponse, requestsCount)
+	responses := make([]*runnergrpc.InvokeInstanceResponse, requestsCount)
 	errs := make([]error, requestsCount)
 
 	startCh := make(chan struct{})
@@ -75,7 +75,7 @@ func TestHeartbeat_ReportsQueuedInvocationsForRunningInstance(t *testing.T) {
 			<-startCh
 			responses[i], errs[i] = client.InvokeFunctionInstance(
 				t.Context(),
-				&runner.InvokeInstanceRequest{
+				&runnergrpc.InvokeInstanceRequest{
 					InstanceId: prepareResp.GetInstanceId(),
 					Method:     http.MethodGet,
 					Path:       testingguestconsts.PathDelayed,
@@ -166,6 +166,6 @@ func TestHeartbeat_ReportsSystemMetrics(t *testing.T) {
 	heartbeatResp, err := client.Heartbeat(t.Context(), nil)
 	require.NoError(t, err)
 
-	assert.GreaterOrEqual(t, heartbeatResp.GetCpuPercent(), 0.0)
+	assert.NotZero(t, heartbeatResp.GetCpuPercent())
 	assert.NotZero(t, heartbeatResp.GetUnusedMemoryBytes())
 }

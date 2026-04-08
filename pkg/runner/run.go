@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
 	grpc "google.golang.org/grpc"
 )
@@ -57,8 +58,12 @@ func Run(ctx context.Context, conf RunnerConfig) error {
 	}
 	// lis.Close by the grpcServer
 
-	grpcServer := server.InstrumentedGrpcServer(monitoringOpts)
-	RegisterRunnerServer(grpcServer, runnerServer)
+	grpcServer := server.InstrumentedGrpcServer(monitoringOpts,
+		server.WithDownloadMetaHolder,
+		server.WithInstanceStartMetaHolder,
+		server.WithInvokeMetaHolder,
+	)
+	runnergrpc.RegisterRunnerServer(grpcServer, runnerServer)
 
 	errCh := make(chan error, 1)
 	go func() {

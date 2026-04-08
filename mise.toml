@@ -69,6 +69,6 @@ run = [
 description = "Generates code from proto files"
 run = [
 	'protoc --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:. pkg/guest/guest.proto',
-	'protoc --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:. pkg/runner/runner.proto',
+	'protoc --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:. pkg/runner/grpc/runner.proto',
 	'protoc --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:. pkg/commander/commander.proto'
 ]

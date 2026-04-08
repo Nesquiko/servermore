@@ -135,7 +135,7 @@ func (s *StubCommander) HttpAddr() string {
 }
 
 func (s *StubCommander) Close() {
-	assert.NoError(os.RemoveAll(s.storageRoot))
+	assert.NoError(os.RemoveAll(filepath.Dir(s.storageRoot)))
 	s.grpcServer.GracefulStop()
 }
 

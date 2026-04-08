@@ -51,13 +51,24 @@ func Run(ctx context.Context, conf CommanderConfig) error {
 		return fmt.Errorf("OTEL initialization failed: %w", err)
 	}
 
-	httpCloser, httpErrCh, err := runHttp(conf, otelCfg, monitoringOpts)
+	funcStorage, err := NewFSFunctionStorage(conf.FuncStorageRoot)
+	if err != nil {
+		return fmt.Errorf("failed to initialize function storage: %w", err)
+	}
+
+	db, err := NewSQLiteDB(conf.DbURI)
+	if err != nil {
+		return fmt.Errorf("failed to initialize db: %w", err)
+	}
+	svc := NewCommanderService(db, funcStorage, server.MonitoringOpts{Env: conf.Env})
+
+	httpCloser, httpErrCh, err := runHttp(conf, svc, otelCfg, monitoringOpts)
 	if err != nil {
 		slog.Error("failed to start http server", "error", err)
 		return fmt.Errorf("http server failed: %w", err)
 	}
 
-	grpcCloser, grpcErrCh, err := runGrpc(ctx, conf, monitoringOpts)
+	grpcCloser, grpcErrCh, err := runGrpc(svc, conf, monitoringOpts)
 	if err != nil {
 		slog.Error("failed to start grpc server", "error", err)
 		return fmt.Errorf("http server failed: %w", err)
@@ -82,6 +93,7 @@ func Run(ctx context.Context, conf CommanderConfig) error {
 	defer shutdownCancel()
 
 	return errors.Join(
+		db.Close(),
 		httpCloser(shutdownCtx),
 		grpcCloser(shutdownCtx),
 		otelShutdown(shutdownCtx),
@@ -90,10 +102,11 @@ func Run(ctx context.Context, conf CommanderConfig) error {
 
 func runHttp(
 	conf CommanderConfig,
+	service *CommanderService,
 	otelCfg otelchimetric.BaseConfig,
 	monitoringOpts server.MonitoringOpts,
 ) (func(context.Context) error, chan error, error) {
-	srv, err := NewCommanderServer(conf)
+	srv, err := NewCommanderServer(service)
 	if err != nil {
 		slog.Error("failed to initialize server", "error", err)
 		return nil, nil, fmt.Errorf("server initialization failed: %w", err)
@@ -130,11 +143,11 @@ func runHttp(
 }
 
 func runGrpc(
-	ctx context.Context,
+	service *CommanderService,
 	conf CommanderConfig,
 	monitoringOpts server.MonitoringOpts,
 ) (func(context.Context) error, chan error, error) {
-	commanderGrpc, grpcCloser, err := newCommanderGrpcServer(ctx, conf, monitoringOpts)
+	commanderGrpc, grpcCloser, err := newCommanderGrpcServer(service)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to initialize runner: %w", err)
 	}
@@ -145,7 +158,7 @@ func runGrpc(
 	}
 	// lis.Close by the grpcServer
 
-	grpcServer := server.InstrumentedGrpcServer(monitoringOpts)
+	grpcServer := server.InstrumentedGrpcServer(monitoringOpts, server.WithRegisterRunnerMetaHolder)
 	RegisterCommanderServer(grpcServer, commanderGrpc)
 
 	errCh := make(chan error, 1)

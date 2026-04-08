@@ -6,6 +6,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"time"
@@ -22,6 +23,8 @@ import (
 var migrations embed.FS
 
 type CommanderDB interface {
+	io.Closer
+
 	CreateFunction(
 		ctx context.Context,
 		path string,
@@ -30,9 +33,13 @@ type CommanderDB interface {
 	) (queries.Function, error)
 	FunctionByID(ctx context.Context, id int64) (queries.Function, error)
 	FunctionExistsByHash(ctx context.Context, hash []byte) (bool, error)
+
+	CreateRunner(ctx context.Context, addr string) (queries.Runner, error)
+	RunnerByAddr(ctx context.Context, addr string) (queries.Runner, error)
 }
 
 type SQLiteCommanderDB struct {
+	db      *sql.DB
 	queries *queries.Queries
 }
 
@@ -50,7 +57,7 @@ func NewSQLiteDB(dbUri string) (*SQLiteCommanderDB, error) {
 		return nil, fmt.Errorf("migrate db schema failed: %w", err)
 	}
 
-	return &SQLiteCommanderDB{queries: queries.New(db)}, nil
+	return &SQLiteCommanderDB{db: db, queries: queries.New(db)}, nil
 }
 
 func migrateUp(db *sql.DB) error {
@@ -122,7 +129,34 @@ func (s *SQLiteCommanderDB) FunctionExistsByHash(ctx context.Context, hash []byt
 	return exists == 1, nil
 }
 
-const MaxRetries = 10
+// CreateRunner implements [CommanderDB].
+func (s *SQLiteCommanderDB) CreateRunner(ctx context.Context, addr string) (queries.Runner, error) {
+	runner, err := WithRetry(ctx, func(ctx context.Context) (queries.Runner, error) {
+		return s.queries.CreateRunner(ctx, addr)
+	})
+	if err != nil {
+		return queries.Runner{}, fmt.Errorf("failed create runner by addr: %w", err)
+	}
+	return runner, nil
+}
+
+// RunnerByAddr implements [CommanderDB].
+func (s *SQLiteCommanderDB) RunnerByAddr(ctx context.Context, addr string) (queries.Runner, error) {
+	runner, err := WithRetry(ctx, func(ctx context.Context) (queries.Runner, error) {
+		return s.queries.RunnerByAddr(ctx, addr)
+	})
+	if err != nil {
+		return queries.Runner{}, fmt.Errorf("failed to get runner by addr: %w", err)
+	}
+	return runner, nil
+}
+
+// Close implements [CommanderDB].
+func (s *SQLiteCommanderDB) Close() error {
+	return s.db.Close()
+}
+
+const MaxRetries = 20
 
 func WithRetry[R any](ctx context.Context, f func(context.Context) (R, error)) (R, error) {
 	retries := 1
@@ -143,7 +177,7 @@ func WithRetry[R any](ctx context.Context, f func(context.Context) (R, error)) (
 		}
 
 		if retries >= MaxRetries {
-			return result, fmt.Errorf("db function errored more than max times: %w", err)
+			return result, fmt.Errorf("db function errored more than %d times: %w", MaxRetries, err)
 		}
 		retries++
 

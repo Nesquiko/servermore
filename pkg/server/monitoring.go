@@ -177,15 +177,14 @@ func CreateHTTPLogger(opts MonitoringOpts) func(http.Handler) http.Handler {
 	})
 }
 
-func InstrumentedGrpcServer(opts MonitoringOpts) *grpc.Server {
+func InstrumentedGrpcServer(
+	opts MonitoringOpts,
+	interceptors ...grpc.UnaryServerInterceptor,
+) *grpc.Server {
+	interceptors = append(interceptors, grpcServerLogger(opts))
 	return grpc.NewServer(
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
-		grpc.ChainUnaryInterceptor(
-			WithDownloadMetaHolder,
-			WithInstanceStartMetaHolder,
-			WithInvokeMetaHolder,
-			grpcServerLogger(opts),
-		),
+		grpc.ChainUnaryInterceptor(interceptors...),
 	)
 }
 
@@ -229,7 +228,7 @@ func grpcLogger(opts MonitoringOpts) (logging.LoggerFunc, []logging.Option) {
 			fields := logging.Fields{}
 
 			if span := trace.SpanContextFromContext(ctx); span.IsSampled() {
-				return logging.Fields{"trace_id", span.TraceID().String()}
+				fields = append(fields, "trace_id", span.TraceID().String())
 			}
 
 			downloadMeta := GetDownloadMeta(ctx)
@@ -245,6 +244,11 @@ func grpcLogger(opts MonitoringOpts) (logging.LoggerFunc, []logging.Option) {
 			invokeMeta := GetInvokeMeta(ctx)
 			if invokeMeta != nil {
 				fields = append(fields, invokeMeta.Fields()...)
+			}
+
+			registerRunnerMeta := GetRegisterRunnerMeta(ctx)
+			if registerRunnerMeta != nil {
+				fields = append(fields, registerRunnerMeta.Fields()...)
 			}
 
 			if len(fields) == 0 {

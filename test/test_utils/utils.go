@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -21,9 +22,19 @@ import (
 )
 
 var (
-	BuildDir          = filepath.Join("..", "..", "tmp")
-	TestingBinaryPath = filepath.Join("..", "..", "tmp", "testing-guest")
+	BuildDir          string
+	TestingBinaryPath string
 )
+
+func init() {
+	_, file, _, ok := runtime.Caller(0)
+	assert.That(ok, "failed to resolve test utils path")
+
+	testUtilsDir := filepath.Dir(file)
+	repoRoot := filepath.Clean(filepath.Join(testUtilsDir, "..", ".."))
+	BuildDir = filepath.Join(repoRoot, "tmp")
+	TestingBinaryPath = filepath.Join(BuildDir, "testing-guest")
+}
 
 // SubdirInTempDir creates new directory in the /tmp/servermore-*/subdir,
 // However the subdir is not created, to let the app handle the creation itself

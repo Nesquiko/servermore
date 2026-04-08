@@ -16,12 +16,13 @@ import (
 	"github.com/Nesquiko/servermore/pkg/assert"
 	"github.com/Nesquiko/servermore/pkg/commander"
 	"github.com/Nesquiko/servermore/pkg/guest"
+	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
 	"github.com/google/uuid"
 )
 
 type runnerGrpcServer struct {
-	UnimplementedRunnerServer
+	runnergrpc.UnimplementedRunnerServer
 
 	runnerId            int64
 	commanderGrpcClient commander.CommanderClient
@@ -39,7 +40,7 @@ type runnerGrpcServer struct {
 	metricsCollector *MetricsCollector
 }
 
-var _ RunnerServer = (*runnerGrpcServer)(nil)
+var _ runnergrpc.RunnerServer = (*runnerGrpcServer)(nil)
 
 func newRunnerGrpcServer(
 	ctx context.Context,
@@ -106,14 +107,14 @@ func newRunnerGrpcServer(
 // Heartbeat implements [RunnerServer].
 func (r *runnerGrpcServer) Heartbeat(
 	context.Context,
-	*HeartbeatRequest,
-) (*HeartbeatResponse, error) {
+	*runnergrpc.HeartbeatRequest,
+) (*runnergrpc.HeartbeatResponse, error) {
 	depths := r.instances.QueueDepths(r.instanceGracePeriod)
 	metrics, err := r.metricsCollector.Collect()
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect metrics: %w", err)
 	}
-	return &HeartbeatResponse{
+	return &runnergrpc.HeartbeatResponse{
 		QueueDepths:       depths,
 		CpuPercent:        metrics.CPUPercent,
 		UnusedMemoryBytes: metrics.UnusedMemoryBytes,
@@ -123,8 +124,8 @@ func (r *runnerGrpcServer) Heartbeat(
 // PrepareFunctionInstance implements [RunnerServer].
 func (r *runnerGrpcServer) PrepareFunctionInstance(
 	ctx context.Context,
-	req *PrepareInstanceRequest,
-) (*PrepareInstanceResponse, error) {
+	req *runnergrpc.PrepareInstanceRequest,
+) (*runnergrpc.PrepareInstanceResponse, error) {
 	funcPath := r.pathOnRunner(req.FunctionPath)
 	meta := &server.DownloadMeta{FunctionID: req.FunctionId, DownloadPath: req.FunctionPath}
 	server.SetDownloadMeta(ctx, meta)
@@ -141,7 +142,10 @@ func (r *runnerGrpcServer) PrepareFunctionInstance(
 		if err != nil {
 			return nil, fmt.Errorf("starting instance failed: %w", err)
 		}
-		return &PrepareInstanceResponse{InstanceId: instanceId.String(), Downloaded: false}, nil
+		return &runnergrpc.PrepareInstanceResponse{
+			InstanceId: instanceId.String(),
+			Downloaded: false,
+		}, nil
 	}
 
 	isDownloading, resultConsumers, downloadCh := r.downloads.IsDownloadedOrStartDownload(funcPath)
@@ -161,7 +165,10 @@ func (r *runnerGrpcServer) PrepareFunctionInstance(
 			if err != nil {
 				return nil, fmt.Errorf("starting instance downloaded by other failed: %w", err)
 			}
-			return &PrepareInstanceResponse{InstanceId: instanceId.String(), Downloaded: false}, nil
+			return &runnergrpc.PrepareInstanceResponse{
+				InstanceId: instanceId.String(),
+				Downloaded: false,
+			}, nil
 		}
 	}
 
@@ -180,7 +187,10 @@ func (r *runnerGrpcServer) PrepareFunctionInstance(
 	if err != nil {
 		return nil, fmt.Errorf("starting downloaded instance failed: %w", err)
 	}
-	return &PrepareInstanceResponse{InstanceId: instanceId.String(), Downloaded: true}, nil
+	return &runnergrpc.PrepareInstanceResponse{
+		InstanceId: instanceId.String(),
+		Downloaded: true,
+	}, nil
 }
 
 func (r *runnerGrpcServer) startInstance(
@@ -236,8 +246,8 @@ func (r *runnerGrpcServer) shutdownAfterTime(instance *instanceState) {
 // InvokeFunctionInstance implements [RunnerServer].
 func (r *runnerGrpcServer) InvokeFunctionInstance(
 	ctx context.Context,
-	req *InvokeInstanceRequest,
-) (*InvokeInstanceResponse, error) {
+	req *runnergrpc.InvokeInstanceRequest,
+) (*runnergrpc.InvokeInstanceResponse, error) {
 	startTime := time.Now()
 	meta := &server.InvokeMeta{
 		InstanceID:       req.InstanceId,
@@ -318,7 +328,7 @@ outer:
 			if err != nil {
 				req.resCh <- &InvocationResult{err: err}
 			} else {
-				req.resCh <- &InvocationResult{resp: &InvokeInstanceResponse{StatusCode: resp.StatusCode, Headers: resp.Headers, Body: resp.Body}}
+				req.resCh <- &InvocationResult{resp: &runnergrpc.InvokeInstanceResponse{StatusCode: resp.StatusCode, Headers: resp.Headers, Body: resp.Body}}
 			}
 
 			if !timer.Reset(WorkerIdleTimeout) {
