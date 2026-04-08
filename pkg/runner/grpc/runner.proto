@@ -1,7 +1,7 @@
 syntax = "proto3";
 
-package runner;
-option go_package = "github.com/Nesquiko/servermore/pkg/runner";
+package runnergrpc;
+option go_package = "github.com/Nesquiko/servermore/pkg/runner/grpc";
 
 message HeartbeatRequest {}
 message HeartbeatResponse {

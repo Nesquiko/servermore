@@ -10,6 +10,7 @@ import (
 
 	"github.com/Nesquiko/servermore/pkg/guest"
 	"github.com/Nesquiko/servermore/pkg/runner"
+	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	testutils "github.com/Nesquiko/servermore/test/test_utils"
 	testingguestconsts "github.com/Nesquiko/servermore/test/testing-guest/consts"
 	"github.com/google/uuid"
@@ -37,7 +38,7 @@ func TestInvokeFunctionInstance_OKResponseFromTestingGuest(t *testing.T) {
 	require.NotEmpty(t, prepareResp.GetInstanceId())
 
 	ctx := t.Context()
-	invokeResp, err := client.InvokeFunctionInstance(ctx, &runner.InvokeInstanceRequest{
+	invokeResp, err := client.InvokeFunctionInstance(ctx, &runnergrpc.InvokeInstanceRequest{
 		InstanceId: prepareResp.GetInstanceId(),
 		Method:     http.MethodGet,
 		Path:       testingguestconsts.PathOK,
@@ -69,7 +70,7 @@ func TestInvokeFunctionInstance_NotFoundPathReturnedByGuest(t *testing.T) {
 	require.NotEmpty(t, prepareResp.GetInstanceId())
 
 	notFoundPath := fmt.Sprintf("/not-found-%s", functionID)
-	invokeResp, err := client.InvokeFunctionInstance(t.Context(), &runner.InvokeInstanceRequest{
+	invokeResp, err := client.InvokeFunctionInstance(t.Context(), &runnergrpc.InvokeInstanceRequest{
 		InstanceId: prepareResp.GetInstanceId(),
 		Method:     http.MethodGet,
 		Path:       notFoundPath,
@@ -100,7 +101,7 @@ func TestInvokeFunctionInstance_ReturnsErrorWhenGuestReturnsRPCError(t *testing.
 	require.NoError(t, err)
 	require.NotEmpty(t, prepareResp.GetInstanceId())
 
-	invokeResp, err := client.InvokeFunctionInstance(t.Context(), &runner.InvokeInstanceRequest{
+	invokeResp, err := client.InvokeFunctionInstance(t.Context(), &runnergrpc.InvokeInstanceRequest{
 		InstanceId: prepareResp.GetInstanceId(),
 		Method:     http.MethodGet,
 		Path:       testingguestconsts.PathError,
@@ -129,7 +130,7 @@ func TestInvokeFunctionInstance_ReturnsErrorWhenGuestReturnsNilResponse(t *testi
 	require.NoError(t, err)
 	require.NotEmpty(t, prepareResp.GetInstanceId())
 
-	invokeResp, err := client.InvokeFunctionInstance(t.Context(), &runner.InvokeInstanceRequest{
+	invokeResp, err := client.InvokeFunctionInstance(t.Context(), &runnergrpc.InvokeInstanceRequest{
 		InstanceId: prepareResp.GetInstanceId(),
 		Method:     http.MethodGet,
 		Path:       testingguestconsts.PathNil,
@@ -144,7 +145,7 @@ func TestInvokeFunctionInstance_InvalidInstanceID(t *testing.T) {
 
 	client := newRunnerClient(t)
 
-	invokeResp, err := client.InvokeFunctionInstance(t.Context(), &runner.InvokeInstanceRequest{
+	invokeResp, err := client.InvokeFunctionInstance(t.Context(), &runnergrpc.InvokeInstanceRequest{
 		InstanceId: "not-a-uuid",
 		Method:     http.MethodGet,
 		Path:       testingguestconsts.PathOK,
@@ -162,7 +163,7 @@ func TestInvokeFunctionInstance_UnknownInstanceID(t *testing.T) {
 	unknownID, err := uuid.NewV7()
 	require.NoError(t, err)
 
-	invokeResp, err := client.InvokeFunctionInstance(t.Context(), &runner.InvokeInstanceRequest{
+	invokeResp, err := client.InvokeFunctionInstance(t.Context(), &runnergrpc.InvokeInstanceRequest{
 		InstanceId: unknownID.String(),
 		Method:     http.MethodGet,
 		Path:       testingguestconsts.PathOK,
@@ -192,7 +193,7 @@ func TestInvokeFunctionInstance_ConcurrentRequestsReuseSamePreparedInstance(t *t
 	require.NotEmpty(t, prepareResp.GetInstanceId())
 
 	requestsCount := 10
-	responses := make([]*runner.InvokeInstanceResponse, requestsCount)
+	responses := make([]*runnergrpc.InvokeInstanceResponse, requestsCount)
 	errs := make([]error, requestsCount)
 
 	var wg sync.WaitGroup
@@ -202,7 +203,7 @@ func TestInvokeFunctionInstance_ConcurrentRequestsReuseSamePreparedInstance(t *t
 			defer wg.Done()
 			responses[i], errs[i] = client.InvokeFunctionInstance(
 				t.Context(),
-				&runner.InvokeInstanceRequest{
+				&runnergrpc.InvokeInstanceRequest{
 					InstanceId: prepareResp.GetInstanceId(),
 					Method:     http.MethodGet,
 					Path:       testingguestconsts.PathOK,
@@ -242,7 +243,7 @@ func TestInvokeFunctionInstance_AfterInstanceShutdownReturnsError(t *testing.T) 
 
 	time.Sleep(TestInstanceShutdownAfter + 250*time.Millisecond)
 
-	invokeResp, err := client.InvokeFunctionInstance(t.Context(), &runner.InvokeInstanceRequest{
+	invokeResp, err := client.InvokeFunctionInstance(t.Context(), &runnergrpc.InvokeInstanceRequest{
 		InstanceId: prepareResp.GetInstanceId(),
 		Method:     http.MethodGet,
 		Path:       testingguestconsts.PathOK,
@@ -277,21 +278,27 @@ func TestPrepareFunctionInstance_SequentialPreparesCreateDistinctInstances(t *te
 
 	assert.NotEqual(t, prepareResp1.GetInstanceId(), prepareResp2.GetInstanceId())
 
-	invokeResp1, err := client.InvokeFunctionInstance(t.Context(), &runner.InvokeInstanceRequest{
-		InstanceId: prepareResp1.GetInstanceId(),
-		Method:     http.MethodGet,
-		Path:       testingguestconsts.PathOK,
-	})
+	invokeResp1, err := client.InvokeFunctionInstance(
+		t.Context(),
+		&runnergrpc.InvokeInstanceRequest{
+			InstanceId: prepareResp1.GetInstanceId(),
+			Method:     http.MethodGet,
+			Path:       testingguestconsts.PathOK,
+		},
+	)
 	require.NoError(t, err)
 	assert.EqualValues(t, 200, invokeResp1.GetStatusCode())
 	assert.Equal(t, testingguestconsts.HeaderJSON, invokeResp1.GetHeaders()["content-type"])
 	assert.Equal(t, []byte(testingguestconsts.BodyOK), invokeResp1.GetBody())
 
-	invokeResp2, err := client.InvokeFunctionInstance(t.Context(), &runner.InvokeInstanceRequest{
-		InstanceId: prepareResp2.GetInstanceId(),
-		Method:     http.MethodGet,
-		Path:       testingguestconsts.PathOK,
-	})
+	invokeResp2, err := client.InvokeFunctionInstance(
+		t.Context(),
+		&runnergrpc.InvokeInstanceRequest{
+			InstanceId: prepareResp2.GetInstanceId(),
+			Method:     http.MethodGet,
+			Path:       testingguestconsts.PathOK,
+		},
+	)
 	require.NoError(t, err)
 	assert.EqualValues(t, 200, invokeResp2.GetStatusCode())
 	assert.Equal(t, testingguestconsts.HeaderJSON, invokeResp2.GetHeaders()["content-type"])

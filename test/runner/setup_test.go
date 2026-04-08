@@ -10,6 +10,7 @@ import (
 
 	"github.com/Nesquiko/servermore/pkg/assert"
 	"github.com/Nesquiko/servermore/pkg/runner"
+	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
 	testutils "github.com/Nesquiko/servermore/test/test_utils"
 	"github.com/stretchr/testify/require"
@@ -84,12 +85,12 @@ func TestMain(m *testing.M) {
 	os.Exit(exitCode)
 }
 
-func newRunnerClient(t *testing.T) runner.RunnerClient {
+func newRunnerClient(t *testing.T) runnergrpc.RunnerClient {
 	t.Helper()
 	return newRunnerClientWithLog(t, slog.LevelInfo)
 }
 
-func newRunnerClientWithLog(t *testing.T, logLevel slog.Level) runner.RunnerClient {
+func newRunnerClientWithLog(t *testing.T, logLevel slog.Level) runnergrpc.RunnerClient {
 	t.Helper()
 
 	monitoringOpts := server.MonitoringOpts{
@@ -105,21 +106,21 @@ func newRunnerClientWithLog(t *testing.T, logLevel slog.Level) runner.RunnerClie
 		server.Close(conn)
 	})
 
-	return runner.NewRunnerClient(conn)
+	return runnergrpc.NewRunnerClient(conn)
 }
 
 func prepareFunctionInstance(
 	t *testing.T,
-	client runner.RunnerClient,
+	client runnergrpc.RunnerClient,
 	functionID string,
 	functionPath string,
-) (*runner.PrepareInstanceResponse, error) {
+) (*runnergrpc.PrepareInstanceResponse, error) {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
-	return client.PrepareFunctionInstance(ctx, &runner.PrepareInstanceRequest{
+	return client.PrepareFunctionInstance(ctx, &runnergrpc.PrepareInstanceRequest{
 		FunctionId:   functionID,
 		FunctionPath: functionPath,
 	})

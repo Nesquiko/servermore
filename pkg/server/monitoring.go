@@ -177,15 +177,14 @@ func CreateHTTPLogger(opts MonitoringOpts) func(http.Handler) http.Handler {
 	})
 }
 
-func InstrumentedGrpcServer(opts MonitoringOpts) *grpc.Server {
+func InstrumentedGrpcServer(
+	opts MonitoringOpts,
+	interceptors ...grpc.UnaryServerInterceptor,
+) *grpc.Server {
 	return grpc.NewServer(
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
-		grpc.ChainUnaryInterceptor(
-			WithDownloadMetaHolder,
-			WithInstanceStartMetaHolder,
-			WithInvokeMetaHolder,
-			grpcServerLogger(opts),
-		),
+		grpc.ChainUnaryInterceptor(interceptors...),
+		grpc.ChainUnaryInterceptor(grpcServerLogger(opts)),
 	)
 }
 
@@ -245,6 +244,11 @@ func grpcLogger(opts MonitoringOpts) (logging.LoggerFunc, []logging.Option) {
 			invokeMeta := GetInvokeMeta(ctx)
 			if invokeMeta != nil {
 				fields = append(fields, invokeMeta.Fields()...)
+			}
+
+			registerRunnerMeta := GetRegisterRunnerMeta(ctx)
+			if registerRunnerMeta != nil {
+				fields = append(fields, registerRunnerMeta.Fields()...)
 			}
 
 			if len(fields) == 0 {

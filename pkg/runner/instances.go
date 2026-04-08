@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Nesquiko/servermore/pkg/assert"
+	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
 	"github.com/google/uuid"
 )
@@ -81,7 +82,7 @@ type InvocationRequest struct {
 }
 
 type InvocationResult struct {
-	resp *InvokeInstanceResponse
+	resp *runnergrpc.InvokeInstanceResponse
 	err  error
 }
 

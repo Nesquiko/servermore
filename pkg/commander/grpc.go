@@ -2,23 +2,23 @@ package commander
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/Nesquiko/servermore/pkg/server"
 )
 
 type commanderGrpcServer struct {
 	UnimplementedCommanderServer
+
+	commanderService *CommanderService
 }
 
 var _ CommanderServer = (*commanderGrpcServer)(nil)
 
-func newCommanderGrpcServer(
-	ctx context.Context,
-	conf CommanderConfig,
-	monitoringOpts server.MonitoringOpts,
-) (*commanderGrpcServer, func(), error) {
+func newCommanderGrpcServer(service *CommanderService) (*commanderGrpcServer, func(), error) {
 	closer := func() {}
-	return &commanderGrpcServer{}, closer, nil
+	return &commanderGrpcServer{commanderService: service}, closer, nil
 }
 
 // Heartbeat implements [CommanderServer].
@@ -31,10 +31,22 @@ func (c *commanderGrpcServer) Heartbeat(
 
 // RegisterRunner implements [CommanderServer].
 func (c *commanderGrpcServer) RegisterRunner(
-	context.Context,
-	*RegisterRunnerRequest,
+	ctx context.Context,
+	req *RegisterRunnerRequest,
 ) (*RegisterRunnerResponse, error) {
-	panic("unimplemented")
+	startTime := time.Now()
+	meta := &server.RegisterRunnerMeta{RunnerAddr: req.GetAddr()}
+	server.SetRegisterRunnerMeta(ctx, meta)
+
+	runn, err := c.commanderService.RegisterRunner(ctx, req.GetAddr())
+	if err != nil {
+		meta.RegistrationTook = time.Since(startTime)
+		return nil, fmt.Errorf("registering runner failed: %w", err)
+	}
+
+	meta.RegistrationTook = time.Since(startTime)
+
+	return &RegisterRunnerResponse{RunnerId: runn.ID}, err
 }
 
 // RouteFunction implements [CommanderServer].

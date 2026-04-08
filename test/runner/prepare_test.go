@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Nesquiko/servermore/pkg/runner"
+	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	testutils "github.com/Nesquiko/servermore/test/test_utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -78,7 +78,7 @@ func TestPrepareFunctionInstance_ConcurrentRequestsShareOneDownload(t *testing.T
 	require.NoError(t, testutils.DeleteIfExists(expectedRunnerPath))
 
 	requestsCount := 10
-	responses := make([]*runner.PrepareInstanceResponse, requestsCount)
+	responses := make([]*runnergrpc.PrepareInstanceResponse, requestsCount)
 	errs := make([]error, requestsCount)
 
 	var wg sync.WaitGroup
@@ -126,7 +126,7 @@ func TestPrepareFunctionInstance_ConcurentErrorsWhenDownloadFails(t *testing.T) 
 	StubCommander.MarkPathToError(functionFilename, downloadErr)
 
 	requestsCount := 10
-	responses := make([]*runner.PrepareInstanceResponse, requestsCount)
+	responses := make([]*runnergrpc.PrepareInstanceResponse, requestsCount)
 	errs := make([]error, requestsCount)
 
 	var wg sync.WaitGroup

@@ -27,19 +27,8 @@ type CommanderHTTPServer struct {
 // Typechecks if CommanderHTTPServer conforms to the interface
 var _ api.ServerInterface = (*CommanderHTTPServer)(nil)
 
-func NewCommanderServer(conf CommanderConfig) (*CommanderHTTPServer, error) {
-	funcStorage, err := NewFSFunctionStorage(conf.FuncStorageRoot)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize function storage: %w", err)
-	}
-
-	db, err := NewSQLiteDB(conf.DbURI)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize db: %w", err)
-	}
-	svc := NewCommanderService(db, funcStorage)
-
-	return &CommanderHTTPServer{service: svc}, nil
+func NewCommanderServer(service *CommanderService) (*CommanderHTTPServer, error) {
+	return &CommanderHTTPServer{service: service}, nil
 }
 
 // CreateFunction implements [api.ServerInterface].

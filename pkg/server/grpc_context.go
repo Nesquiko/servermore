@@ -9,9 +9,10 @@ import (
 )
 
 type (
-	downloadMetaKey      struct{}
-	instanceStartMetaKey struct{}
-	invokeMetaKey        struct{}
+	downloadMetaKey       struct{}
+	instanceStartMetaKey  struct{}
+	invokeMetaKey         struct{}
+	registerRunnerMetaKey struct{}
 
 	downloadMetaHolder struct {
 		Meta *DownloadMeta
@@ -23,6 +24,10 @@ type (
 
 	invokeMetaHolder struct {
 		Meta *InvokeMeta
+	}
+
+	registerRunnerMetaHolder struct {
+		Meta *RegisterRunnerMeta
 	}
 )
 
@@ -85,6 +90,24 @@ type InvokeMeta struct {
 	ResponseBodyBytes    int
 }
 
+type RegisterRunnerMeta struct {
+	RunnerAddr        string
+	RunnerID          int64
+	ExistingRunner    bool
+	RunnerHeartbeatOK bool
+	RegistrationTook  time.Duration
+}
+
+func (m RegisterRunnerMeta) Fields() logging.Fields {
+	return logging.Fields{
+		"register_runner.addr", m.RunnerAddr,
+		"register_runner.id", m.RunnerID,
+		"register_runner.existing", m.ExistingRunner,
+		"register_runner.heartbeat_ok", m.RunnerHeartbeatOK,
+		"register_runner.took", m.RegistrationTook,
+	}
+}
+
 func (m InvokeMeta) Fields() logging.Fields {
 	return logging.Fields{
 		"invoke.instance_id", m.InstanceID,
@@ -132,6 +155,17 @@ func WithInvokeMetaHolder(
 ) (any, error) {
 	holder := &invokeMetaHolder{}
 	ctx = context.WithValue(ctx, invokeMetaKey{}, holder)
+	return handler(ctx, req)
+}
+
+func WithRegisterRunnerMetaHolder(
+	ctx context.Context,
+	req any,
+	info *grpc.UnaryServerInfo,
+	handler grpc.UnaryHandler,
+) (any, error) {
+	holder := &registerRunnerMetaHolder{}
+	ctx = context.WithValue(ctx, registerRunnerMetaKey{}, holder)
 	return handler(ctx, req)
 }
 
@@ -192,6 +226,28 @@ func GetInvokeMeta(ctx context.Context) *InvokeMeta {
 
 func SetInvokeMeta(ctx context.Context, meta *InvokeMeta) {
 	holder, ok := ctx.Value(invokeMetaKey{}).(*invokeMetaHolder)
+	if !ok {
+		return
+	} else if holder == nil {
+		return
+	}
+
+	holder.Meta = meta
+}
+
+func GetRegisterRunnerMeta(ctx context.Context) *RegisterRunnerMeta {
+	holder, ok := ctx.Value(registerRunnerMetaKey{}).(*registerRunnerMetaHolder)
+	if !ok {
+		return nil
+	} else if holder == nil {
+		return nil
+	}
+
+	return holder.Meta
+}
+
+func SetRegisterRunnerMeta(ctx context.Context, meta *RegisterRunnerMeta) {
+	holder, ok := ctx.Value(registerRunnerMetaKey{}).(*registerRunnerMetaHolder)
 	if !ok {
 		return
 	} else if holder == nil {
