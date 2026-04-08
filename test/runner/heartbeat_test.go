@@ -167,5 +167,5 @@ func TestHeartbeat_ReportsSystemMetrics(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.GreaterOrEqual(t, heartbeatResp.GetCpuPercent(), 0.0)
-	assert.Greater(t, heartbeatResp.GetMemoryBytes(), uint64(0))
+	assert.NotZero(t, heartbeatResp.GetUnusedMemoryBytes())
 }
