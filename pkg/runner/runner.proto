@@ -7,6 +7,8 @@ message HeartbeatRequest {}
 message HeartbeatResponse {
   // instance_id to the queue depth on the runner
   map<string, uint32> queue_depths = 1;
+  double cpu_percent = 2;
+  uint64 unused_memory_bytes = 3;
 }
 
 message PrepareInstanceRequest {

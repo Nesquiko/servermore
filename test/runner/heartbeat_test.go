@@ -152,3 +152,20 @@ func TestHeartbeat_DoesNotReportStoppedInstanceAfterShutdownTimeout(t *testing.T
 	require.NoError(t, err)
 	assert.NotContains(t, heartbeatResp.GetQueueDepths(), prepareResp.GetInstanceId())
 }
+
+func TestHeartbeat_ReportsSystemMetrics(t *testing.T) {
+	t.Parallel()
+
+	client := newRunnerClient(t)
+
+	_, err := client.Heartbeat(t.Context(), nil)
+	require.NoError(t, err)
+
+	time.Sleep(100 * time.Millisecond)
+
+	heartbeatResp, err := client.Heartbeat(t.Context(), nil)
+	require.NoError(t, err)
+
+	assert.GreaterOrEqual(t, heartbeatResp.GetCpuPercent(), 0.0)
+	assert.NotZero(t, heartbeatResp.GetUnusedMemoryBytes())
+}
