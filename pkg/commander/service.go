@@ -100,7 +100,7 @@ func (svc *CommanderService) RegisterRunner(
 		return queries.Runner{}, fmt.Errorf("querying runner by addr failed: %w", err)
 	}
 	meta.RunnerID = run.ID
-	meta.ExistingRunner = true
+	meta.PreexistingRunner = true
 
 	return run, nil
 }

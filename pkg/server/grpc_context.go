@@ -93,7 +93,7 @@ type InvokeMeta struct {
 type RegisterRunnerMeta struct {
 	RunnerAddr        string
 	RunnerID          int64
-	ExistingRunner    bool
+	PreexistingRunner bool
 	RunnerHeartbeatOK bool
 	RegistrationTook  time.Duration
 }
@@ -102,7 +102,7 @@ func (m RegisterRunnerMeta) Fields() logging.Fields {
 	return logging.Fields{
 		"register_runner.addr", m.RunnerAddr,
 		"register_runner.id", m.RunnerID,
-		"register_runner.existing", m.ExistingRunner,
+		"register_runner.preexisting", m.PreexistingRunner,
 		"register_runner.heartbeat_ok", m.RunnerHeartbeatOK,
 		"register_runner.took", m.RegistrationTook,
 	}

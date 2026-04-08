@@ -13,4 +13,5 @@ select * from runners where addr = ?;
 
 -- name: CreateRunner :one
 insert into runners(addr) values (?)
+on conflict(addr) do update set addr = excluded.addr
 returning *;

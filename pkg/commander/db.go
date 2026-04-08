@@ -156,7 +156,7 @@ func (s *SQLiteCommanderDB) Close() error {
 	return s.db.Close()
 }
 
-const MaxRetries = 10
+const MaxRetries = 20
 
 func WithRetry[R any](ctx context.Context, f func(context.Context) (R, error)) (R, error) {
 	retries := 1
@@ -177,7 +177,7 @@ func WithRetry[R any](ctx context.Context, f func(context.Context) (R, error)) (
 		}
 
 		if retries >= MaxRetries {
-			return result, fmt.Errorf("db function errored more than max times: %w", err)
+			return result, fmt.Errorf("db function errored more than %d times: %w", MaxRetries, err)
 		}
 		retries++
 
