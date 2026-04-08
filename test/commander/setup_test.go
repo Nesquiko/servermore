@@ -11,6 +11,7 @@ import (
 	"github.com/Nesquiko/servermore/pkg/commander"
 	"github.com/Nesquiko/servermore/pkg/server"
 	testutils "github.com/Nesquiko/servermore/test/test_utils"
+	testqueries "github.com/Nesquiko/servermore/test/test_utils/queries.gen"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 )
@@ -20,6 +21,7 @@ var (
 	GrcpServerUrl   string
 	TestStorageRoot string
 	DbFilePath      string
+	TestQueries     testqueries.Querier
 )
 
 func TestMain(m *testing.M) {
@@ -93,9 +95,16 @@ func TestMain(m *testing.M) {
 		}
 	}
 
+	TestQueries, err = testutils.OpenTestDB(ctx, DbFilePath)
+	if err != nil {
+		slog.Error("failed to create test commander queries", "error", err)
+		os.Exit(1)
+	}
+
 	exitCode := m.Run()
-	if err := os.RemoveAll(TestStorageRoot); err != nil {
-		slog.Error("failed to remove temp dir", "dir", TestStorageRoot, "error", err)
+
+	if err := os.RemoveAll(filepath.Dir(TestStorageRoot)); err != nil {
+		slog.Error("failed to remove temp dir", "dir", filepath.Dir(TestStorageRoot), "error", err)
 	}
 
 	os.Exit(exitCode)

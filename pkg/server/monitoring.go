@@ -181,10 +181,10 @@ func InstrumentedGrpcServer(
 	opts MonitoringOpts,
 	interceptors ...grpc.UnaryServerInterceptor,
 ) *grpc.Server {
+	interceptors = append(interceptors, grpcServerLogger(opts))
 	return grpc.NewServer(
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		grpc.ChainUnaryInterceptor(interceptors...),
-		grpc.ChainUnaryInterceptor(grpcServerLogger(opts)),
 	)
 }
 
@@ -228,7 +228,7 @@ func grpcLogger(opts MonitoringOpts) (logging.LoggerFunc, []logging.Option) {
 			fields := logging.Fields{}
 
 			if span := trace.SpanContextFromContext(ctx); span.IsSampled() {
-				return logging.Fields{"trace_id", span.TraceID().String()}
+				fields = append(fields, "trace_id", span.TraceID().String())
 			}
 
 			downloadMeta := GetDownloadMeta(ctx)

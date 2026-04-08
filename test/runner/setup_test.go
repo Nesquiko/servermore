@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -78,8 +79,8 @@ func TestMain(m *testing.M) {
 	exitCode := m.Run()
 
 	StubCommander.Close()
-	if err := os.RemoveAll(TestRunnerStorageRoot); err != nil {
-		slog.Error("failed to remove temp dir", "dir", TestRunnerStorageRoot, "error", err)
+	if err := os.RemoveAll(filepath.Dir(TestRunnerStorageRoot)); err != nil {
+		slog.Error("failed to remove temp dir", "dir", filepath.Dir(TestRunnerStorageRoot), "error", err)
 	}
 
 	os.Exit(exitCode)

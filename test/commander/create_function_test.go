@@ -13,7 +13,6 @@ import (
 	commanderapi "github.com/Nesquiko/servermore/pkg/api/commander"
 	commonapi "github.com/Nesquiko/servermore/pkg/api/common"
 	"github.com/Nesquiko/servermore/pkg/server"
-	testutils "github.com/Nesquiko/servermore/test/test_utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -46,8 +45,7 @@ func TestCreateFunction_Created(t *testing.T) {
 	assert.NotZero(t, created.Id)
 	assert.Equal(t, funcName, created.Name)
 
-	queries := testutils.TestDB(t, DbFilePath)
-	dbFunc, err := queries.FunctionById(t.Context(), created.Id)
+	dbFunc, err := TestQueries.FunctionById(t.Context(), created.Id)
 	require.NoError(t, err, "query created function by id")
 
 	assert.Equal(t, created.Id, dbFunc.ID)
