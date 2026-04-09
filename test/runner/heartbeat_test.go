@@ -164,17 +164,17 @@ func TestHeartbeat_ReportsSystemMetrics(t *testing.T) {
 	busyDone := make(chan struct{})
 	go func() {
 		defer close(busyDone)
-		deadline := time.Now().Add(200 * time.Millisecond)
+		deadline := time.Now().Add(300 * time.Millisecond)
 		var x uint64
 		for time.Now().Before(deadline) {
 			x++
 		}
 		_ = x
 	}()
-	<-busyDone
 
 	heartbeatResp, err := client.Heartbeat(t.Context(), nil)
 	require.NoError(t, err)
+	<-busyDone
 
 	assert.NotZero(t, heartbeatResp.GetCpuPercent())
 	assert.NotZero(t, heartbeatResp.GetUnusedMemoryBytes())
