@@ -56,4 +56,3 @@ func (c *commanderGrpcServer) RouteFunction(
 ) (*RouteFunctionResponse, error) {
 	panic("unimplemented")
 }
-
