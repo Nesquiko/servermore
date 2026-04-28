@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	api "github.com/Nesquiko/servermore/pkg/api/commander"
 	"github.com/Nesquiko/servermore/pkg/assert"
+	"github.com/Nesquiko/servermore/pkg/caching"
 	queries "github.com/Nesquiko/servermore/pkg/commander/queries.gen"
 	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
@@ -20,6 +22,7 @@ type CommanderServiceConfig struct{}
 type CommanderService struct {
 	db          CommanderDB
 	funcStorage *FileSystemFunctionStorage
+	cache       caching.RoutingCache
 
 	runnerClientOpts server.MonitoringOpts
 }
@@ -33,8 +36,21 @@ func NewCommanderService(
 	db CommanderDB,
 	funcStorage *FileSystemFunctionStorage,
 	runnerClientOpts server.MonitoringOpts,
+	cache caching.RoutingCache,
 ) *CommanderService {
-	return &CommanderService{db: db, funcStorage: funcStorage, runnerClientOpts: runnerClientOpts}
+	return &CommanderService{
+		db:               db,
+		funcStorage:      funcStorage,
+		runnerClientOpts: runnerClientOpts,
+		cache:            cache,
+	}
+}
+
+func (svc *CommanderService) PollRunnerHeartbeats(
+	ctx context.Context,
+	executedAt time.Time,
+) error {
+	panic("not yet")
 }
 
 func (svc *CommanderService) CreateFunction(
