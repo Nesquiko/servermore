@@ -3,6 +3,7 @@ package caching
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sync"
 )
 
@@ -35,7 +36,10 @@ func NewInMemoryCache() *InMemoryCache {
 var _ RoutingCache = (*InMemoryCache)(nil)
 
 // FunctionIdInstances implements [RoutingCache].
-func (c *InMemoryCache) FunctionIdInstances(_ context.Context, funcId string) (map[string]int, error) {
+func (c *InMemoryCache) FunctionIdInstances(
+	_ context.Context,
+	funcId string,
+) (map[string]int, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -45,14 +49,15 @@ func (c *InMemoryCache) FunctionIdInstances(_ context.Context, funcId string) (m
 	}
 
 	result := make(map[string]int, len(instances))
-	for id, queueLen := range instances {
-		result[id] = queueLen
-	}
+	maps.Copy(result, instances)
 	return result, nil
 }
 
 // RunnerAddressOfInstance implements [RoutingCache].
-func (c *InMemoryCache) RunnerAddressOfInstance(_ context.Context, instanceId string) (string, error) {
+func (c *InMemoryCache) RunnerAddressOfInstance(
+	_ context.Context,
+	instanceId string,
+) (string, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -69,9 +74,7 @@ func (c *InMemoryCache) RequestsPerRunner(_ context.Context) (map[string]int, er
 	defer c.mu.RUnlock()
 
 	result := make(map[string]int, len(c.runnerRequests))
-	for addr, count := range c.runnerRequests {
-		result[addr] = count
-	}
+	maps.Copy(result, c.runnerRequests)
 	return result, nil
 }
 
@@ -81,9 +84,7 @@ func (c *InMemoryCache) StatsPerRunner(_ context.Context) (map[string]ResourceMe
 	defer c.mu.RUnlock()
 
 	result := make(map[string]ResourceMetrics, len(c.runnerStats))
-	for addr, metrics := range c.runnerStats {
-		result[addr] = metrics
-	}
+	maps.Copy(result, c.runnerStats)
 	return result, nil
 }
 
