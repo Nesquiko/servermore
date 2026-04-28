@@ -15,3 +15,6 @@ select * from runners where addr = ?;
 insert into runners(addr) values (?)
 on conflict(addr) do update set addr = excluded.addr
 returning *;
+
+-- name: GetAllRunners :many
+select * from runners order by id;
