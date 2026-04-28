@@ -17,8 +17,8 @@ func TestInMemoryCache_FunctionIdInstances_Empty(t *testing.T) {
 
 func TestInMemoryCache_FunctionIdInstances(t *testing.T) {
 	cache := NewInMemoryCache()
-	cache.SetInstance("fn-1", "inst-a", "runner:9000", 3)
-	cache.SetInstance("fn-1", "inst-b", "runner:9000", 7)
+	require.NoError(t, cache.SetInstance(context.Background(), "fn-1", "inst-a", "runner:9000", 3))
+	require.NoError(t, cache.SetInstance(context.Background(), "fn-1", "inst-b", "runner:9000", 7))
 
 	instances, err := cache.FunctionIdInstances(context.Background(), "fn-1")
 	require.NoError(t, err)
@@ -27,7 +27,7 @@ func TestInMemoryCache_FunctionIdInstances(t *testing.T) {
 
 func TestInMemoryCache_FunctionIdInstances_UpdateQueueLen(t *testing.T) {
 	cache := NewInMemoryCache()
-	cache.SetInstance("fn-1", "inst-a", "runner:9000", 3)
+	require.NoError(t, cache.SetInstance(context.Background(), "fn-1", "inst-a", "runner:9000", 3))
 	cache.UpdateInstanceQueueLen("fn-1", "inst-a", 10)
 
 	instances, err := cache.FunctionIdInstances(context.Background(), "fn-1")
@@ -37,7 +37,7 @@ func TestInMemoryCache_FunctionIdInstances_UpdateQueueLen(t *testing.T) {
 
 func TestInMemoryCache_RunnerAddressOfInstance(t *testing.T) {
 	cache := NewInMemoryCache()
-	cache.SetInstance("fn-1", "inst-a", "runner:9000", 0)
+	require.NoError(t, cache.SetInstance(context.Background(), "fn-1", "inst-a", "runner:9000", 0))
 
 	addr, err := cache.RunnerAddressOfInstance(context.Background(), "inst-a")
 	require.NoError(t, err)
@@ -71,13 +71,13 @@ func TestInMemoryCache_RequestsPerRunner_Empty(t *testing.T) {
 
 func TestInMemoryCache_StatsPerRunner(t *testing.T) {
 	cache := NewInMemoryCache()
-	cache.SetRunnerStats("runner:9000", ResourceMetrics{CpuUtilization: 0.45, RamUsage: 0.60})
+	cache.SetRunnerStats("runner:9000", ResourceMetrics{CpuPercent: 45.5, UnusedMemoryBytes: 1024})
 
 	stats, err := cache.StatsPerRunner(context.Background())
 	require.NoError(t, err)
 	require.Contains(t, stats, "runner:9000")
-	assert.InDelta(t, 0.45, stats["runner:9000"].CpuUtilization, 0.001)
-	assert.InDelta(t, 0.60, stats["runner:9000"].RamUsage, 0.001)
+	assert.InDelta(t, 45.5, stats["runner:9000"].CpuPercent, 0.001)
+	assert.Equal(t, uint64(1024), stats["runner:9000"].UnusedMemoryBytes)
 }
 
 func TestInMemoryCache_StatsPerRunner_Empty(t *testing.T) {
@@ -86,4 +86,77 @@ func TestInMemoryCache_StatsPerRunner_Empty(t *testing.T) {
 	stats, err := cache.StatsPerRunner(context.Background())
 	require.NoError(t, err)
 	assert.Empty(t, stats)
+}
+
+func TestInMemoryCache_UpsertRunnerHeartbeat(t *testing.T) {
+	cache := NewInMemoryCache()
+	require.NoError(t, cache.SetInstance(context.Background(), "fn-1", "inst-a", "runner:9000", 3))
+	require.NoError(t, cache.SetInstance(context.Background(), "fn-1", "inst-b", "runner:9000", 7))
+	require.NoError(t, cache.SetInstance(context.Background(), "fn-2", "inst-c", "runner:9001", 4))
+
+	require.NoError(
+		t,
+		cache.UpsertRunnerHeartbeat(
+			context.Background(),
+			"runner:9000",
+			map[string]uint32{"inst-a": 10},
+			ResourceMetrics{CpuPercent: 45.5, UnusedMemoryBytes: 1024},
+		),
+	)
+	require.NoError(
+		t,
+		cache.UpsertRunnerHeartbeat(
+			context.Background(),
+			"runner:9001",
+			map[string]uint32{},
+			ResourceMetrics{CpuPercent: 12.25, UnusedMemoryBytes: 2048},
+		),
+	)
+
+	instances, err := cache.FunctionIdInstances(context.Background(), "fn-1")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]int{"inst-a": 10}, instances)
+
+	instances, err = cache.FunctionIdInstances(context.Background(), "fn-2")
+	require.NoError(t, err)
+	assert.Empty(t, instances)
+
+	reqs, err := cache.RequestsPerRunner(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, map[string]int{"runner:9000": 10, "runner:9001": 0}, reqs)
+
+	stats, err := cache.StatsPerRunner(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, ResourceMetrics{CpuPercent: 45.5, UnusedMemoryBytes: 1024}, stats["runner:9000"])
+	assert.Equal(t, ResourceMetrics{CpuPercent: 12.25, UnusedMemoryBytes: 2048}, stats["runner:9001"])
+
+	addr, err := cache.RunnerAddressOfInstance(context.Background(), "inst-a")
+	require.NoError(t, err)
+	assert.Equal(t, "runner:9000", addr)
+
+	_, err = cache.RunnerAddressOfInstance(context.Background(), "inst-b")
+	assert.Error(t, err)
+}
+
+func TestInMemoryCache_RemoveRunner(t *testing.T) {
+	cache := NewInMemoryCache()
+	require.NoError(t, cache.SetInstance(context.Background(), "fn-1", "inst-a", "runner:9000", 3))
+	cache.SetRunnerStats("runner:9000", ResourceMetrics{CpuPercent: 45.5, UnusedMemoryBytes: 1024})
+
+	require.NoError(t, cache.RemoveRunner(context.Background(), "runner:9000"))
+
+	instances, err := cache.FunctionIdInstances(context.Background(), "fn-1")
+	require.NoError(t, err)
+	assert.Empty(t, instances)
+
+	reqs, err := cache.RequestsPerRunner(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, reqs)
+
+	stats, err := cache.StatsPerRunner(context.Background())
+	require.NoError(t, err)
+	assert.Empty(t, stats)
+
+	_, err = cache.RunnerAddressOfInstance(context.Background(), "inst-a")
+	assert.Error(t, err)
 }
