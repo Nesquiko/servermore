@@ -4,19 +4,21 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/Nesquiko/servermore/pkg/commander"
 )
 
 func main() {
 	config := commander.CommanderConfig{
-		AppName:         "commander",
-		Env:             "LOCAL",
-		Host:            "localhost",
-		HttpPort:        "42069",
-		GrpcPort:        "42070",
-		DbURI:           "./tmp/commander.db",
-		FuncStorageRoot: "/tmp/commander",
+		AppName:             "commander",
+		Env:                 "LOCAL",
+		Host:                "localhost",
+		HttpPort:            "42069",
+		GrpcPort:            "42070",
+		DbURI:               "./tmp/commander.db",
+		FuncStorageRoot:     "/tmp/commander",
+		RunnerHeartbeatPoll: 250 * time.Millisecond,
 	}
 
 	ctx := context.Background()
