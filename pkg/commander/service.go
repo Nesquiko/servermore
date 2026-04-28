@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
 	api "github.com/Nesquiko/servermore/pkg/api/commander"
@@ -14,6 +15,7 @@ import (
 	queries "github.com/Nesquiko/servermore/pkg/commander/queries.gen"
 	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 )
 
@@ -50,7 +52,103 @@ func (svc *CommanderService) PollRunnerHeartbeats(
 	ctx context.Context,
 	executedAt time.Time,
 ) error {
-	panic("not yet")
+	runners, err := svc.db.GetAllRunners(ctx)
+	if err != nil {
+		return fmt.Errorf("querying runners failed: %w", err)
+	}
+
+	var eg errgroup.Group
+	for _, runn := range runners {
+		eg.Go(func() error {
+			svc.pollRunnerHeartbeat(ctx, executedAt, runn)
+			return nil
+		})
+	}
+
+	return eg.Wait()
+}
+
+const runnerHeartbeatTimeout = 1 * time.Second
+
+func (svc *CommanderService) pollRunnerHeartbeat(
+	ctx context.Context,
+	executedAt time.Time,
+	runn queries.Runner,
+) {
+	runnerCtx, cancel := context.WithTimeout(ctx, runnerHeartbeatTimeout)
+	defer cancel()
+
+	runnerClient, conn, err := newRunnerClient(runn.Addr, svc.runnerClientOpts)
+	if err != nil {
+		slog.Error(
+			"failed to create runner client for heartbeat",
+			"runner.addr", runn.Addr,
+			"time", executedAt,
+			"error", err,
+		)
+		svc.evictRunner(ctx, executedAt, runn.Addr, "failed to create runner client for heartbeat")
+		return
+	}
+	defer server.Close(conn)
+
+	resp, err := runnerClient.Heartbeat(runnerCtx, &runnergrpc.HeartbeatRequest{})
+	if err != nil {
+		slog.Error(
+			"runner heartbeat failed",
+			"runner.addr", runn.Addr,
+			"time", executedAt,
+			"error", err,
+		)
+		svc.evictRunner(ctx, executedAt, runn.Addr, "runner heartbeat failed")
+		return
+	}
+
+	if resp == nil {
+		slog.Error(
+			"runner heartbeat returned nil response",
+			"runner.addr", runn.Addr,
+			"time", executedAt,
+		)
+		svc.evictRunner(ctx, executedAt, runn.Addr, "runner heartbeat returned nil response")
+		return
+	}
+
+	cacheCtx, cacheCancel := context.WithTimeout(ctx, runnerHeartbeatTimeout)
+	defer cacheCancel()
+
+	metrics := caching.ResourceMetrics{
+		CpuPercent:        resp.GetCpuPercent(),
+		UnusedMemoryBytes: resp.GetUnusedMemoryBytes(),
+	}
+
+	err = svc.cache.UpsertRunnerHeartbeat(cacheCtx, runn.Addr, resp.GetQueueDepths(), metrics)
+	if err != nil {
+		slog.Error(
+			"failed to cache runner heartbeat",
+			"runner.addr", runn.Addr,
+			"time", executedAt,
+			"error", err,
+		)
+	}
+}
+
+func (svc *CommanderService) evictRunner(
+	ctx context.Context,
+	executedAt time.Time,
+	runnerAddr, reason string,
+) {
+	cacheCtx, cancel := context.WithTimeout(ctx, runnerHeartbeatTimeout)
+	defer cancel()
+
+	if err := svc.cache.RemoveRunner(cacheCtx, runnerAddr); err != nil {
+		slog.Error(
+			"failed to evict runner from cache",
+			"runner.addr", runnerAddr,
+			"time", executedAt,
+			"reason", reason,
+			"error", err,
+		)
+	}
 }
 
 func (svc *CommanderService) CreateFunction(
