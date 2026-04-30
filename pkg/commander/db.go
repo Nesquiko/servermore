@@ -36,6 +36,7 @@ type CommanderDB interface {
 
 	CreateRunner(ctx context.Context, addr string) (queries.Runner, error)
 	RunnerByAddr(ctx context.Context, addr string) (queries.Runner, error)
+	GetAllRunners(ctx context.Context) ([]queries.Runner, error)
 }
 
 type SQLiteCommanderDB struct {
@@ -149,6 +150,17 @@ func (s *SQLiteCommanderDB) RunnerByAddr(ctx context.Context, addr string) (quer
 		return queries.Runner{}, fmt.Errorf("failed to get runner by addr: %w", err)
 	}
 	return runner, nil
+}
+
+// GetAllRunners implements [CommanderDB].
+func (s *SQLiteCommanderDB) GetAllRunners(ctx context.Context) ([]queries.Runner, error) {
+	runners, err := WithRetry(ctx, func(ctx context.Context) ([]queries.Runner, error) {
+		return s.queries.GetAllRunners(ctx)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all runners: %w", err)
+	}
+	return runners, nil
 }
 
 // Close implements [CommanderDB].

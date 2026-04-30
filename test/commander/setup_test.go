@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Nesquiko/servermore/pkg/commander"
 	"github.com/Nesquiko/servermore/pkg/server"
@@ -49,13 +50,14 @@ func TestMain(m *testing.M) {
 	DbFilePath = filepath.Join(TestStorageRoot, "test-commander.db")
 
 	config := commander.CommanderConfig{
-		AppName:         "test-commander",
-		Env:             "TEST",
-		Host:            "localhost",
-		HttpPort:        httpPort,
-		GrpcPort:        grpcPort,
-		DbURI:           DbFilePath,
-		FuncStorageRoot: TestStorageRoot,
+		AppName:             "test-commander",
+		Env:                 "TEST",
+		Host:                "localhost",
+		HttpPort:            httpPort,
+		GrpcPort:            grpcPort,
+		DbURI:               DbFilePath,
+		FuncStorageRoot:     TestStorageRoot,
+		RunnerHeartbeatPoll: 250 * time.Millisecond,
 	}
 	HttpServerUrl = fmt.Sprintf("http://%s:%s", config.Host, config.HttpPort)
 	GrcpServerUrl = config.GrpcAddr()

@@ -13,6 +13,8 @@ import (
 	"time"
 
 	api "github.com/Nesquiko/servermore/pkg/api/commander"
+	"github.com/Nesquiko/servermore/pkg/assert"
+	"github.com/Nesquiko/servermore/pkg/caching"
 	"github.com/Nesquiko/servermore/pkg/server"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -30,6 +32,8 @@ type CommanderConfig struct {
 
 	DbURI           string
 	FuncStorageRoot AbsolutePath
+
+	RunnerHeartbeatPoll time.Duration
 }
 
 func (c CommanderConfig) GrpcAddr() string {
@@ -60,7 +64,10 @@ func Run(ctx context.Context, conf CommanderConfig) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize db: %w", err)
 	}
-	svc := NewCommanderService(db, funcStorage, server.MonitoringOpts{Env: conf.Env})
+
+	routingCache := caching.NewInMemoryCache()
+	svc := NewCommanderService(db, funcStorage, server.MonitoringOpts{Env: conf.Env}, routingCache)
+	runnerHeartbeatPolling(ctx, conf, svc)
 
 	httpCloser, httpErrCh, err := runHttp(conf, svc, otelCfg, monitoringOpts)
 	if err != nil {
@@ -189,4 +196,29 @@ func createMiddleware(
 		out[i] = api.MiddlewareFunc(m)
 	}
 	return out
+}
+
+func runnerHeartbeatPolling(ctx context.Context, conf CommanderConfig, svc *CommanderService) {
+	assert.That(
+		conf.RunnerHeartbeatPoll > 0,
+		"RunnerHeartbeatPoll can't be 0 or less, it was %d",
+		conf.RunnerHeartbeatPoll,
+	)
+
+	ticker := time.NewTicker(conf.RunnerHeartbeatPoll)
+
+	go func() {
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case t := <-ticker.C:
+				if err := svc.PollRunnerHeartbeats(ctx, t); err != nil {
+					slog.Error("error when polling runner heartbeats", "error", err, "time", t)
+				}
+			}
+		}
+	}()
 }

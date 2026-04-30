@@ -14,9 +14,23 @@ type RoutingCache interface {
 
 	// StatsPerRunner returns (last known) runner resource metrics
 	StatsPerRunner(ctx context.Context) (map[string]ResourceMetrics, error)
+
+	// SetInstance registers or updates a function instance and its runner.
+	SetInstance(ctx context.Context, funcId, instanceId, runnerAddr string, queueLen int) error
+
+	// UpsertRunnerHeartbeat replaces the cached heartbeat data for a runner.
+	UpsertRunnerHeartbeat(
+		ctx context.Context,
+		runnerAddr string,
+		queueDepths map[string]uint32,
+		metrics ResourceMetrics,
+	) error
+
+	// RemoveRunner evicts a runner and all of its cached instances.
+	RemoveRunner(ctx context.Context, runnerAddr string) error
 }
 
 type ResourceMetrics struct {
-	CpuUtilization float32
-	RamUsage       float32
+	CpuPercent        float64
+	UnusedMemoryBytes uint64
 }
