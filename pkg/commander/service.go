@@ -13,20 +13,24 @@ import (
 	"github.com/Nesquiko/servermore/pkg/assert"
 	"github.com/Nesquiko/servermore/pkg/caching"
 	queries "github.com/Nesquiko/servermore/pkg/commander/queries.gen"
+	"github.com/Nesquiko/servermore/pkg/routing"
 	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 )
 
-type CommanderServiceConfig struct{}
+type CommanderServiceConfig struct {
+	RunnerClientOpts server.MonitoringOpts
+}
 
 type CommanderService struct {
 	db          CommanderDB
 	funcStorage *FileSystemFunctionStorage
 	cache       caching.RoutingCache
+	router      routing.Router
 
-	runnerClientOpts server.MonitoringOpts
+	config CommanderServiceConfig
 }
 
 var (
@@ -37,14 +41,16 @@ var (
 func NewCommanderService(
 	db CommanderDB,
 	funcStorage *FileSystemFunctionStorage,
-	runnerClientOpts server.MonitoringOpts,
 	cache caching.RoutingCache,
+	router routing.Router,
+	config CommanderServiceConfig,
 ) *CommanderService {
 	return &CommanderService{
-		db:               db,
-		funcStorage:      funcStorage,
-		runnerClientOpts: runnerClientOpts,
-		cache:            cache,
+		db:          db,
+		funcStorage: funcStorage,
+		config:      config,
+		router:      router,
+		cache:       cache,
 	}
 }
 
@@ -78,7 +84,7 @@ func (svc *CommanderService) pollRunnerHeartbeat(
 	runnerCtx, cancel := context.WithTimeout(ctx, runnerHeartbeatTimeout)
 	defer cancel()
 
-	runnerClient, conn, err := newRunnerClient(runn.Addr, svc.runnerClientOpts)
+	runnerClient, conn, err := newRunnerClient(runn.Addr, svc.config.RunnerClientOpts)
 	if err != nil {
 		slog.Error(
 			"failed to create runner client for heartbeat",
@@ -219,6 +225,25 @@ func (svc *CommanderService) RegisterRunner(
 	return run, nil
 }
 
+func (svc *CommanderService) RouteFunction(
+	ctx context.Context,
+	functionId string,
+) (routing.Routing, error) {
+	routingData, err := svc.router.Route(
+		ctx,
+		functionId,
+		svc.cache,
+		svc.db,
+		runnerClientSupplier(svc.config.RunnerClientOpts),
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return routing.Routing{}, ErrFunctionNotFound
+	} else if err != nil {
+		return routing.Routing{}, fmt.Errorf("router failed: %w", err)
+	}
+	return routingData, nil
+}
+
 // persistNewRunner tries to call heartbeat on the provided address,
 // if it succeds then persists new runner.
 func (svc *CommanderService) persistNewRunner(
@@ -230,7 +255,7 @@ func (svc *CommanderService) persistNewRunner(
 		meta.RunnerAddr = addr
 	}
 
-	runnerClient, conn, err := newRunnerClient(addr, svc.runnerClientOpts)
+	runnerClient, conn, err := newRunnerClient(addr, svc.config.RunnerClientOpts)
 	if err != nil {
 		return queries.Runner{}, fmt.Errorf("initializing runner at %q failed: %w", addr, err)
 	}
@@ -253,6 +278,14 @@ func (svc *CommanderService) persistNewRunner(
 	}
 
 	return runn, nil
+}
+
+func runnerClientSupplier(
+	monitoringOpts server.MonitoringOpts,
+) routing.RunnerClientSupplier {
+	return func(addr string) (runnergrpc.RunnerClient, *grpc.ClientConn, error) {
+		return newRunnerClient(addr, monitoringOpts)
+	}
 }
 
 func newRunnerClient(

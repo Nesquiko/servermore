@@ -5,7 +5,8 @@ import (
 	"errors"
 
 	"github.com/Nesquiko/servermore/pkg/caching"
-	"github.com/Nesquiko/servermore/pkg/runner/grpc"
+	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
+	"google.golang.org/grpc"
 )
 
 var ErrNoRunnerAvailable = errors.New("there is no healthy runner available")
@@ -16,14 +17,16 @@ type Router interface {
 		functionId string,
 		cache caching.RoutingCache,
 		db FunctionDb,
-		runnerClientSupplier func(addr string) (grpc.RunnerClient, error),
+		runnerClientSupplier RunnerClientSupplier,
 	) (Routing, error)
 }
 
 type Routing struct {
-	runnerAddr string
-	instanceId string
+	RunnerAddr string
+	InstanceId string
 }
+
+type RunnerClientSupplier = func(addr string) (runnergrpc.RunnerClient, *grpc.ClientConn, error)
 
 type FunctionDb interface {
 	FunctionPathById(ctx context.Context, id string) (string, error)

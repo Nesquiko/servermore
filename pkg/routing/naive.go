@@ -6,6 +6,7 @@ import (
 
 	"github.com/Nesquiko/servermore/pkg/caching"
 	"github.com/Nesquiko/servermore/pkg/runner/grpc"
+	"github.com/Nesquiko/servermore/pkg/server"
 )
 
 type NaiveRouter struct {
@@ -28,7 +29,7 @@ func (n *NaiveRouter) Route(
 	functionId string,
 	cache caching.RoutingCache,
 	db FunctionDb,
-	runnerClientSupplier func(addr string) (grpc.RunnerClient, error),
+	runnerClientSupplier RunnerClientSupplier,
 ) (Routing, error) {
 	instances, err := cache.FunctionIdInstances(ctx, functionId)
 	if err != nil {
@@ -53,15 +54,16 @@ func (n *NaiveRouter) Route(
 		return Routing{}, fmt.Errorf("failed to read function by id %q: %w", functionId, err)
 	}
 
-	healthyRunner := pickHealthyRunner(runners, n.runnerOverloadThreshold)
+	healthyRunner := pickLeastLoadedRunner(runners, n.runnerOverloadThreshold)
 	if healthyRunner == "" {
 		return Routing{}, ErrNoRunnerAvailable
 	}
 
-	runnerClient, err := runnerClientSupplier(healthyRunner)
+	runnerClient, conn, err := runnerClientSupplier(healthyRunner)
 	if err != nil {
 		return Routing{}, fmt.Errorf("failed to construct runner client: %w", err)
 	}
+	defer server.Close(conn)
 
 	resp, err := runnerClient.PrepareFunctionInstance(
 		ctx,
@@ -71,7 +73,7 @@ func (n *NaiveRouter) Route(
 		return Routing{}, fmt.Errorf("prepare instance call failed: %w", err)
 	}
 
-	return Routing{runnerAddr: healthyRunner, instanceId: resp.InstanceId}, nil
+	return Routing{RunnerAddr: healthyRunner, InstanceId: resp.InstanceId}, nil
 }
 
 func pickHealthyInstance(
@@ -89,22 +91,31 @@ func pickHealthyInstance(
 					instId, err,
 				)
 			}
-			return &Routing{runnerAddr: runnerAddr, instanceId: instId}, nil
+			return &Routing{RunnerAddr: runnerAddr, InstanceId: instId}, nil
 		}
 	}
 
 	return nil, nil
 }
 
-func pickHealthyRunner(
+const MaxInt = int((^uint(0)) >> 1)
+
+func pickLeastLoadedRunner(
 	requestsPerRunner map[string]int,
 	overloadThreshold int,
 ) string {
+	leastLoaded := ""
+	min := MaxInt
+
 	for runnerAddr, requests := range requestsPerRunner {
-		if requests < overloadThreshold {
-			return runnerAddr
+		if requests >= overloadThreshold {
+			continue
+		}
+		if requests < min {
+			leastLoaded = runnerAddr
+			min = requests
 		}
 	}
 
-	return ""
+	return leastLoaded
 }

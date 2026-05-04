@@ -11,14 +11,16 @@ import (
 
 func main() {
 	config := commander.CommanderConfig{
-		AppName:             "commander",
-		Env:                 "LOCAL",
-		Host:                "localhost",
-		HttpPort:            "42069",
-		GrpcPort:            "42070",
-		DbURI:               "./tmp/commander.db",
-		FuncStorageRoot:     "/tmp/commander",
-		RunnerHeartbeatPoll: 250 * time.Millisecond,
+		AppName:                     "commander",
+		Env:                         "LOCAL",
+		Host:                        "localhost",
+		HttpPort:                    "42069",
+		GrpcPort:                    "42070",
+		DbURI:                       "./tmp/commander.db",
+		FuncStorageRoot:             "/tmp/commander",
+		RunnerHeartbeatPoll:         250 * time.Millisecond,
+		RunnerOverloadedQueueSize:   256,
+		InstanceOverloadedQueueSize: 8,
 	}
 
 	ctx := context.Background()

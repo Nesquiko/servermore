@@ -15,6 +15,7 @@ import (
 	api "github.com/Nesquiko/servermore/pkg/api/commander"
 	"github.com/Nesquiko/servermore/pkg/assert"
 	"github.com/Nesquiko/servermore/pkg/caching"
+	"github.com/Nesquiko/servermore/pkg/routing"
 	"github.com/Nesquiko/servermore/pkg/server"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -34,6 +35,9 @@ type CommanderConfig struct {
 	FuncStorageRoot AbsolutePath
 
 	RunnerHeartbeatPoll time.Duration
+
+	RunnerOverloadedQueueSize   int
+	InstanceOverloadedQueueSize int
 }
 
 func (c CommanderConfig) GrpcAddr() string {
@@ -66,7 +70,17 @@ func Run(ctx context.Context, conf CommanderConfig) error {
 	}
 
 	routingCache := caching.NewInMemoryCache()
-	svc := NewCommanderService(db, funcStorage, server.MonitoringOpts{Env: conf.Env}, routingCache)
+	router := routing.NewNaiveRouter(
+		conf.InstanceOverloadedQueueSize,
+		conf.RunnerOverloadedQueueSize,
+	)
+	svc := NewCommanderService(
+		db,
+		funcStorage,
+		routingCache,
+		router,
+		CommanderServiceConfig{RunnerClientOpts: server.MonitoringOpts{Env: conf.Env}},
+	)
 	runnerHeartbeatPolling(ctx, conf, svc)
 
 	httpCloser, httpErrCh, err := runHttp(conf, svc, otelCfg, monitoringOpts)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/Nesquiko/servermore/pkg/caching"
 	"github.com/Nesquiko/servermore/pkg/commander"
+	"github.com/Nesquiko/servermore/pkg/routing"
 	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
 	testutils "github.com/Nesquiko/servermore/test/test_utils"
@@ -214,11 +215,15 @@ func newRunnerCheckService(
 	require.NoError(t, err)
 
 	cache := caching.NewInMemoryCache()
+	router := routing.NewNaiveRouter(1, 1)
 	svc := commander.NewCommanderService(
 		db,
 		funcStorage,
-		server.MonitoringOpts{Env: "TEST", AppName: "runner-check-test"},
 		cache,
+		router,
+		commander.CommanderServiceConfig{
+			RunnerClientOpts: server.MonitoringOpts{Env: "TEST", AppName: "runner-check-test"},
+		},
 	)
 
 	return svc, cache, db
