@@ -33,7 +33,6 @@ type CommanderDB interface {
 	) (queries.Function, error)
 	FunctionByID(ctx context.Context, id int64) (queries.Function, error)
 	FunctionExistsByHash(ctx context.Context, hash []byte) (bool, error)
-
 	CreateRunner(ctx context.Context, addr string) (queries.Runner, error)
 	RunnerByAddr(ctx context.Context, addr string) (queries.Runner, error)
 	GetAllRunners(ctx context.Context) ([]queries.Runner, error)

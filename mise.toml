@@ -10,7 +10,7 @@ air = "1.64.5"
 golangci-lint = "2.11.4"
 "aqua:golang-migrate/migrate" = "4.19.1"
 
-[tasks.build]
+[tasks.compile]
 description = "Generates necessary source files and checks if everything is correct."
 depends = ['sqlc-generate', 'openapi-generate', 'grpc-generate']
 run = 'go build ./...'
@@ -24,7 +24,7 @@ run = [
 
 [tasks.test]
 description = "Runs all the test in repo"
-depends = ['build']
+depends = ['compile']
 usage = '''
 flag "--count <count>" help="How many times to run tests" default="1"
 '''

@@ -2,10 +2,14 @@ package commander
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/Nesquiko/servermore/pkg/routing"
 	"github.com/Nesquiko/servermore/pkg/server"
+	codes "google.golang.org/grpc/codes"
+	status "google.golang.org/grpc/status"
 )
 
 type commanderGrpcServer struct {
@@ -51,8 +55,20 @@ func (c *commanderGrpcServer) RegisterRunner(
 
 // RouteFunction implements [CommanderServer].
 func (c *commanderGrpcServer) RouteFunction(
-	context.Context,
-	*RouteFunctionRequest,
+	ctx context.Context,
+	req *RouteFunctionRequest,
 ) (*RouteFunctionResponse, error) {
-	panic("unimplemented")
+	routingData, err := c.commanderService.RouteFunction(ctx, req.GetFunctionId())
+	if errors.Is(err, routing.ErrNoRunnerAvailable) {
+		return nil, status.Error(codes.Unavailable, err.Error())
+	} else if errors.Is(err, ErrFunctionNotFound) {
+		return nil, status.Error(codes.NotFound, err.Error())
+	} else if err != nil {
+		return nil, fmt.Errorf("routing failed: %w", err)
+	}
+
+	return &RouteFunctionResponse{
+		RunnerAddr: routingData.RunnerAddr,
+		InstanceId: routingData.InstanceId,
+	}, nil
 }

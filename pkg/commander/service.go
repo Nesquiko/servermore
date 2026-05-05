@@ -7,26 +7,31 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
 	"time"
 
 	api "github.com/Nesquiko/servermore/pkg/api/commander"
 	"github.com/Nesquiko/servermore/pkg/assert"
 	"github.com/Nesquiko/servermore/pkg/caching"
 	queries "github.com/Nesquiko/servermore/pkg/commander/queries.gen"
+	"github.com/Nesquiko/servermore/pkg/routing"
 	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 )
 
-type CommanderServiceConfig struct{}
+type CommanderServiceConfig struct {
+	RunnerClientOpts server.MonitoringOpts
+}
 
 type CommanderService struct {
 	db          CommanderDB
 	funcStorage *FileSystemFunctionStorage
 	cache       caching.RoutingCache
+	router      routing.Router
 
-	runnerClientOpts server.MonitoringOpts
+	config CommanderServiceConfig
 }
 
 var (
@@ -37,14 +42,16 @@ var (
 func NewCommanderService(
 	db CommanderDB,
 	funcStorage *FileSystemFunctionStorage,
-	runnerClientOpts server.MonitoringOpts,
 	cache caching.RoutingCache,
+	router routing.Router,
+	config CommanderServiceConfig,
 ) *CommanderService {
 	return &CommanderService{
-		db:               db,
-		funcStorage:      funcStorage,
-		runnerClientOpts: runnerClientOpts,
-		cache:            cache,
+		db:          db,
+		funcStorage: funcStorage,
+		config:      config,
+		router:      router,
+		cache:       cache,
 	}
 }
 
@@ -78,7 +85,7 @@ func (svc *CommanderService) pollRunnerHeartbeat(
 	runnerCtx, cancel := context.WithTimeout(ctx, runnerHeartbeatTimeout)
 	defer cancel()
 
-	runnerClient, conn, err := newRunnerClient(runn.Addr, svc.runnerClientOpts)
+	runnerClient, conn, err := newRunnerClient(runn.Addr, svc.config.RunnerClientOpts)
 	if err != nil {
 		slog.Error(
 			"failed to create runner client for heartbeat",
@@ -219,6 +226,59 @@ func (svc *CommanderService) RegisterRunner(
 	return run, nil
 }
 
+func (svc *CommanderService) RouteFunction(
+	ctx context.Context,
+	functionId string,
+) (routing.Routing, error) {
+	routingData, err := svc.router.Route(ctx, functionId, svc.cache)
+	if errors.Is(err, sql.ErrNoRows) {
+		return routing.Routing{}, ErrFunctionNotFound
+	} else if prepareErr, ok := errors.AsType[*routing.ErrPrepareInstance](err); ok {
+		return svc.prepareInstance(ctx, prepareErr.FunctionId, prepareErr.RunnerAddr)
+	} else if err != nil {
+		return routing.Routing{}, fmt.Errorf("router failed: %w", err)
+	}
+	return routingData, nil
+}
+
+func (svc *CommanderService) prepareInstance(
+	ctx context.Context,
+	functionId, runnerAddr string,
+) (routing.Routing, error) {
+	funcId, err := strconv.ParseInt(functionId, 10, 0)
+	if err != nil {
+		return routing.Routing{}, fmt.Errorf(
+			"failed to convert functionId %q to int: %w",
+			functionId, err,
+		)
+	}
+
+	function, err := svc.db.FunctionByID(ctx, funcId)
+	if errors.Is(err, sql.ErrNoRows) {
+		return routing.Routing{}, ErrFunctionNotFound
+	} else if err != nil {
+		return routing.Routing{}, fmt.Errorf(
+			"failed to read function by id %q: %w",
+			functionId, err,
+		)
+	}
+
+	runnerClient, conn, err := newRunnerClient(runnerAddr, svc.config.RunnerClientOpts)
+	if err != nil {
+		return routing.Routing{}, fmt.Errorf("failed to construct runner client: %w", err)
+	}
+	defer server.Close(conn)
+
+	resp, err := runnerClient.PrepareFunctionInstance(ctx, &runnergrpc.PrepareInstanceRequest{
+		FunctionId:   functionId,
+		FunctionPath: function.Path,
+	})
+	if err != nil {
+		return routing.Routing{}, fmt.Errorf("prepare instance call failed: %w", err)
+	}
+	return routing.Routing{RunnerAddr: runnerAddr, InstanceId: resp.InstanceId}, nil
+}
+
 // persistNewRunner tries to call heartbeat on the provided address,
 // if it succeds then persists new runner.
 func (svc *CommanderService) persistNewRunner(
@@ -230,7 +290,7 @@ func (svc *CommanderService) persistNewRunner(
 		meta.RunnerAddr = addr
 	}
 
-	runnerClient, conn, err := newRunnerClient(addr, svc.runnerClientOpts)
+	runnerClient, conn, err := newRunnerClient(addr, svc.config.RunnerClientOpts)
 	if err != nil {
 		return queries.Runner{}, fmt.Errorf("initializing runner at %q failed: %w", addr, err)
 	}

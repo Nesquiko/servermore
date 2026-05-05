@@ -27,6 +27,11 @@ type StubRunner struct {
 	heartbeatError error
 	heartbeatDelay time.Duration
 	heartbeatCalls atomic.Int64
+
+	prepareConfigured bool
+	prepareResp       *runnergrpc.PrepareInstanceResponse
+	prepareError      error
+	prepareCallsCount atomic.Int64
 }
 
 func RunStubRunner(ctx context.Context) *StubRunner {
@@ -111,6 +116,10 @@ func (s *StubRunner) HeartbeatCalls() int64 {
 	return s.heartbeatCalls.Load()
 }
 
+func (s *StubRunner) PrepareCallsCount() int64 {
+	return s.prepareCallsCount.Load()
+}
+
 // SetHeartbeat configures the response returned by Heartbeat.
 func (s *StubRunner) SetHeartbeat(resp *runnergrpc.HeartbeatResponse, err error) {
 	s.mu.Lock()
@@ -125,6 +134,16 @@ func (s *StubRunner) SetHeartbeatDelay(delay time.Duration) {
 	defer s.mu.Unlock()
 
 	s.heartbeatDelay = delay
+}
+
+// SetPrepare configures the response returned by PrepareFunctionInstance.
+func (s *StubRunner) SetPrepare(resp *runnergrpc.PrepareInstanceResponse, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.prepareResp = clonePrepareInstanceResponse(resp)
+	s.prepareError = err
+	s.prepareConfigured = true
 }
 
 func cloneHeartbeatResponse(resp *runnergrpc.HeartbeatResponse) *runnergrpc.HeartbeatResponse {
@@ -143,6 +162,19 @@ func cloneHeartbeatResponse(resp *runnergrpc.HeartbeatResponse) *runnergrpc.Hear
 	}
 
 	return cloned
+}
+
+func clonePrepareInstanceResponse(
+	resp *runnergrpc.PrepareInstanceResponse,
+) *runnergrpc.PrepareInstanceResponse {
+	if resp == nil {
+		return &runnergrpc.PrepareInstanceResponse{}
+	}
+
+	return &runnergrpc.PrepareInstanceResponse{
+		InstanceId: resp.GetInstanceId(),
+		Downloaded: resp.GetDownloaded(),
+	}
 }
 
 func (s *StubRunner) Heartbeat(
@@ -179,7 +211,22 @@ func (s *StubRunner) PrepareFunctionInstance(
 	context.Context,
 	*runnergrpc.PrepareInstanceRequest,
 ) (*runnergrpc.PrepareInstanceResponse, error) {
-	panic("PrepareFunctionInstance should not be called in stub runner")
+	s.prepareCallsCount.Add(1)
+
+	s.mu.RLock()
+	configured := s.prepareConfigured
+	resp := clonePrepareInstanceResponse(s.prepareResp)
+	prepareErr := s.prepareError
+	s.mu.RUnlock()
+
+	if !configured {
+		panic("PrepareFunctionInstance called in stub runner without configuring it")
+	}
+	if prepareErr != nil {
+		return nil, prepareErr
+	}
+
+	return resp, nil
 }
 
 func (s *StubRunner) InvokeFunctionInstance(
