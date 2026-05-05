@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
 
@@ -34,9 +33,6 @@ type CommanderDB interface {
 	) (queries.Function, error)
 	FunctionByID(ctx context.Context, id int64) (queries.Function, error)
 	FunctionExistsByHash(ctx context.Context, hash []byte) (bool, error)
-	// FunctionPathById accepts id as string to comply with db in routing
-	FunctionPathById(ctx context.Context, id string) (string, error)
-
 	CreateRunner(ctx context.Context, addr string) (queries.Runner, error)
 	RunnerByAddr(ctx context.Context, addr string) (queries.Runner, error)
 	GetAllRunners(ctx context.Context) ([]queries.Runner, error)
@@ -119,21 +115,6 @@ func (s *SQLiteCommanderDB) FunctionByID(ctx context.Context, id int64) (queries
 	}
 
 	return f, nil
-}
-
-// FunctionPathById implements [CommanderDB].
-func (s *SQLiteCommanderDB) FunctionPathById(ctx context.Context, id string) (string, error) {
-	funcId, err := strconv.ParseInt(id, 10, 0)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse id to int64: %w", err)
-	}
-
-	f, err := s.FunctionByID(ctx, funcId)
-	if err != nil {
-		return "", fmt.Errorf("failed to get function path by id: %w", err)
-	}
-
-	return f.Path, nil
 }
 
 // FunctionExistsByHash implements [CommanderDB].

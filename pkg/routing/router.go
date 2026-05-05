@@ -3,6 +3,7 @@ package routing
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/Nesquiko/servermore/pkg/caching"
 	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
@@ -11,14 +12,21 @@ import (
 
 var ErrNoRunnerAvailable = errors.New("there is no healthy runner available")
 
+type ErrPrepareInstance struct {
+	FunctionId string
+	RunnerAddr string
+}
+
+func (err *ErrPrepareInstance) Error() string {
+	return fmt.Sprintf(
+		"prepare instance for functionId %q on runner %q",
+		err.FunctionId,
+		err.RunnerAddr,
+	)
+}
+
 type Router interface {
-	Route(
-		ctx context.Context,
-		functionId string,
-		cache caching.RoutingCache,
-		db FunctionDb,
-		runnerClientSupplier RunnerClientSupplier,
-	) (Routing, error)
+	Route(ctx context.Context, functionId string, cache caching.RoutingCache) (Routing, error)
 }
 
 type Routing struct {

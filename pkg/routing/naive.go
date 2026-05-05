@@ -5,8 +5,6 @@ import (
 	"fmt"
 
 	"github.com/Nesquiko/servermore/pkg/caching"
-	"github.com/Nesquiko/servermore/pkg/runner/grpc"
-	"github.com/Nesquiko/servermore/pkg/server"
 )
 
 type NaiveRouter struct {
@@ -28,8 +26,6 @@ func (n *NaiveRouter) Route(
 	ctx context.Context,
 	functionId string,
 	cache caching.RoutingCache,
-	db FunctionDb,
-	runnerClientSupplier RunnerClientSupplier,
 ) (Routing, error) {
 	instances, err := cache.FunctionIdInstances(ctx, functionId)
 	if err != nil {
@@ -49,31 +45,12 @@ func (n *NaiveRouter) Route(
 		return Routing{}, fmt.Errorf("failed to read requests per runner: %w", err)
 	}
 
-	functionPath, err := db.FunctionPathById(ctx, functionId)
-	if err != nil {
-		return Routing{}, fmt.Errorf("failed to read function by id %q: %w", functionId, err)
-	}
-
 	healthyRunner := pickLeastLoadedRunner(runners, n.runnerOverloadThreshold)
 	if healthyRunner == "" {
 		return Routing{}, ErrNoRunnerAvailable
 	}
 
-	runnerClient, conn, err := runnerClientSupplier(healthyRunner)
-	if err != nil {
-		return Routing{}, fmt.Errorf("failed to construct runner client: %w", err)
-	}
-	defer server.Close(conn)
-
-	resp, err := runnerClient.PrepareFunctionInstance(
-		ctx,
-		&grpc.PrepareInstanceRequest{FunctionId: functionId, FunctionPath: functionPath},
-	)
-	if err != nil {
-		return Routing{}, fmt.Errorf("prepare instance call failed: %w", err)
-	}
-
-	return Routing{RunnerAddr: healthyRunner, InstanceId: resp.InstanceId}, nil
+	return Routing{}, &ErrPrepareInstance{FunctionId: functionId, RunnerAddr: healthyRunner}
 }
 
 func pickHealthyInstance(

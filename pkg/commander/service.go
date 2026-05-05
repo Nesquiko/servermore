@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strconv"
 	"time"
 
 	api "github.com/Nesquiko/servermore/pkg/api/commander"
@@ -229,19 +230,51 @@ func (svc *CommanderService) RouteFunction(
 	ctx context.Context,
 	functionId string,
 ) (routing.Routing, error) {
-	routingData, err := svc.router.Route(
-		ctx,
-		functionId,
-		svc.cache,
-		svc.db,
-		runnerClientSupplier(svc.config.RunnerClientOpts),
-	)
+	routingData, err := svc.router.Route(ctx, functionId, svc.cache)
 	if errors.Is(err, sql.ErrNoRows) {
 		return routing.Routing{}, ErrFunctionNotFound
+	} else if prepareErr, ok := errors.AsType[*routing.ErrPrepareInstance](err); ok {
+		return svc.prepareIntance(ctx, prepareErr.FunctionId, prepareErr.RunnerAddr)
 	} else if err != nil {
 		return routing.Routing{}, fmt.Errorf("router failed: %w", err)
 	}
 	return routingData, nil
+}
+
+func (svc *CommanderService) prepareIntance(
+	ctx context.Context,
+	functionId, runnerAddr string,
+) (routing.Routing, error) {
+	funcId, err := strconv.ParseInt(functionId, 10, 0)
+	if err != nil {
+		return routing.Routing{}, fmt.Errorf(
+			"failed to convert functionId %q to int: %w",
+			functionId, err,
+		)
+	}
+
+	function, err := svc.db.FunctionByID(ctx, funcId)
+	if err != nil {
+		return routing.Routing{}, fmt.Errorf(
+			"failed to read function by id %q: %w",
+			functionId, err,
+		)
+	}
+
+	runnerClient, conn, err := newRunnerClient(runnerAddr, svc.config.RunnerClientOpts)
+	if err != nil {
+		return routing.Routing{}, fmt.Errorf("failed to construct runner client: %w", err)
+	}
+	defer server.Close(conn)
+
+	resp, err := runnerClient.PrepareFunctionInstance(ctx, &runnergrpc.PrepareInstanceRequest{
+		FunctionId:   functionId,
+		FunctionPath: function.Path,
+	})
+	if err != nil {
+		return routing.Routing{}, fmt.Errorf("prepare instance call failed: %w", err)
+	}
+	return routing.Routing{RunnerAddr: runnerAddr, InstanceId: resp.InstanceId}, nil
 }
 
 // persistNewRunner tries to call heartbeat on the provided address,
@@ -278,14 +311,6 @@ func (svc *CommanderService) persistNewRunner(
 	}
 
 	return runn, nil
-}
-
-func runnerClientSupplier(
-	monitoringOpts server.MonitoringOpts,
-) routing.RunnerClientSupplier {
-	return func(addr string) (runnergrpc.RunnerClient, *grpc.ClientConn, error) {
-		return newRunnerClient(addr, monitoringOpts)
-	}
 }
 
 func newRunnerClient(
