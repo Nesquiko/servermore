@@ -155,7 +155,7 @@ func submitFunction(
 		filename,
 		binaryBytes,
 	)
-	defer bodyFile.Close()
+	defer server.Close(bodyFile)
 
 	req, err := http.NewRequest(http.MethodPost, HttpServerUrl+"/functions", bodyFile)
 	require.NoError(t, err, "create request")

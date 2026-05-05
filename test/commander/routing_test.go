@@ -19,7 +19,7 @@ func TestRouteFunction_PreparesThenReusesExistingInstance(t *testing.T) {
 	originalRunnerRequests, err := TestCache.RequestsPerRunner(ctx)
 	require.NoError(t, err)
 	for runnerAddr := range originalRunnerRequests {
-		TestCache.RemoveRunner(ctx, runnerAddr)
+		require.NoError(t, TestCache.RemoveRunner(ctx, runnerAddr))
 	}
 	t.Cleanup(func() {
 		for runnerAddr, requests := range originalRunnerRequests {
@@ -45,7 +45,7 @@ func TestRouteFunction_PreparesThenReusesExistingInstance(t *testing.T) {
 	stubRunner.SetPrepare(&runnergrpc.PrepareInstanceResponse{InstanceId: "prepared-inst-1"}, nil)
 	t.Cleanup(stubRunner.Close)
 	t.Cleanup(func() {
-		TestCache.RemoveRunner(ctx, stubRunner.GrpcAddr())
+		require.NoError(t, TestCache.RemoveRunner(ctx, stubRunner.GrpcAddr()))
 	})
 	TestCache.SetRunnerRequests(stubRunner.GrpcAddr(), 0)
 
@@ -95,7 +95,7 @@ func TestRouteFunction_PreparesThenReusesExistingInstance(t *testing.T) {
 		)
 		t.Cleanup(leastLoadedRunner.Close)
 		t.Cleanup(func() {
-			TestCache.RemoveRunner(ctx, leastLoadedRunner.GrpcAddr())
+			require.NoError(t, TestCache.RemoveRunner(ctx, leastLoadedRunner.GrpcAddr()))
 		})
 
 		TestCache.SetRunnerRequests(stubRunner.GrpcAddr(), 0)
@@ -127,7 +127,7 @@ func TestRouteFunction_ReturnsNotFoundWhenFunctionMissing(t *testing.T) {
 	stubRunner := testutils.RunStubRunner(ctx)
 	t.Cleanup(stubRunner.Close)
 	t.Cleanup(func() {
-		TestCache.RemoveRunner(ctx, stubRunner.GrpcAddr())
+		require.NoError(t, TestCache.RemoveRunner(ctx, stubRunner.GrpcAddr()))
 	})
 
 	TestCache.SetRunnerRequests(stubRunner.GrpcAddr(), 0)
