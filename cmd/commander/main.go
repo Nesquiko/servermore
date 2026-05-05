@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Nesquiko/servermore/pkg/caching"
 	"github.com/Nesquiko/servermore/pkg/commander"
 )
 
@@ -24,7 +25,8 @@ func main() {
 	}
 
 	ctx := context.Background()
-	if err := commander.Run(ctx, config); err != nil {
+	cache := caching.NewInMemoryCache()
+	if err := commander.Run(ctx, cache, config); err != nil {
 		slog.Error("commander server failed", "error", err)
 		os.Exit(1)
 	}

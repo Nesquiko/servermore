@@ -2,13 +2,16 @@ package commander_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	commanderapi "github.com/Nesquiko/servermore/pkg/api/commander"
 	"github.com/Nesquiko/servermore/pkg/caching"
 	"github.com/Nesquiko/servermore/pkg/commander"
 	"github.com/Nesquiko/servermore/pkg/server"
@@ -19,12 +22,13 @@ import (
 )
 
 var (
-	HttpServerUrl   string
-	GrcpServerUrl   string
-	TestStorageRoot string
-	DbFilePath      string
-	TestQueries     testqueries.Querier
-	TestCache       *caching.InMemoryCache
+	HttpServerUrl     string
+	GrcpServerUrl     string
+	TestStorageRoot   string
+	DbFilePath        string
+	TestQueries       testqueries.Querier
+	TestCache         *caching.InMemoryCache
+	TestCommanderConf commander.CommanderConfig
 )
 
 func TestMain(m *testing.M) {
@@ -51,24 +55,26 @@ func TestMain(m *testing.M) {
 	}
 	DbFilePath = filepath.Join(TestStorageRoot, "test-commander.db")
 
-	config := commander.CommanderConfig{
-		AppName:             "test-commander",
-		Env:                 "TEST",
-		Host:                "localhost",
-		HttpPort:            httpPort,
-		GrpcPort:            grpcPort,
-		DbURI:               DbFilePath,
-		FuncStorageRoot:     TestStorageRoot,
-		RunnerHeartbeatPoll: 250 * time.Millisecond,
+	TestCommanderConf = commander.CommanderConfig{
+		AppName:                     "test-commander",
+		Env:                         "TEST",
+		Host:                        "localhost",
+		HttpPort:                    httpPort,
+		GrpcPort:                    grpcPort,
+		DbURI:                       DbFilePath,
+		FuncStorageRoot:             TestStorageRoot,
+		RunnerHeartbeatPoll:         250 * time.Millisecond,
+		RunnerOverloadedQueueSize:   5,
+		InstanceOverloadedQueueSize: 2,
 	}
-	HttpServerUrl = fmt.Sprintf("http://%s:%s", config.Host, config.HttpPort)
-	GrcpServerUrl = config.GrpcAddr()
+	HttpServerUrl = fmt.Sprintf("http://%s:%s", TestCommanderConf.Host, TestCommanderConf.HttpPort)
+	GrcpServerUrl = TestCommanderConf.GrpcAddr()
 
-	TestCache := caching.NewInMemoryCache()
+	TestCache = caching.NewInMemoryCache()
 
 	runErrCh := make(chan error, 1)
 	go func() {
-		runErrCh <- commander.Run(ctx, TestCache, config)
+		runErrCh <- commander.Run(ctx, TestCache, TestCommanderConf)
 	}()
 
 	var eg errgroup.Group
@@ -133,4 +139,37 @@ func newCommanderClient(t *testing.T) commander.CommanderClient {
 	})
 
 	return commander.NewCommanderClient(conn)
+}
+
+func submitFunction(
+	t *testing.T,
+	name string,
+	filename string,
+	binaryBytes []byte,
+) commanderapi.Function {
+	t.Helper()
+
+	bodyFile, contentType := createFunctionMultipartBodyFromBytes(
+		t,
+		name,
+		filename,
+		binaryBytes,
+	)
+	defer bodyFile.Close()
+
+	req, err := http.NewRequest(http.MethodPost, HttpServerUrl+"/functions", bodyFile)
+	require.NoError(t, err, "create request")
+	req.Header.Set("Content-Type", contentType)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err, "send request")
+	defer server.Close(resp.Body)
+
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	var created commanderapi.Function
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&created), "decode response")
+	require.NotZero(t, created.Id)
+
+	return created
 }

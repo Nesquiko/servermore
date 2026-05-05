@@ -234,14 +234,14 @@ func (svc *CommanderService) RouteFunction(
 	if errors.Is(err, sql.ErrNoRows) {
 		return routing.Routing{}, ErrFunctionNotFound
 	} else if prepareErr, ok := errors.AsType[*routing.ErrPrepareInstance](err); ok {
-		return svc.prepareIntance(ctx, prepareErr.FunctionId, prepareErr.RunnerAddr)
+		return svc.prepareInstance(ctx, prepareErr.FunctionId, prepareErr.RunnerAddr)
 	} else if err != nil {
 		return routing.Routing{}, fmt.Errorf("router failed: %w", err)
 	}
 	return routingData, nil
 }
 
-func (svc *CommanderService) prepareIntance(
+func (svc *CommanderService) prepareInstance(
 	ctx context.Context,
 	functionId, runnerAddr string,
 ) (routing.Routing, error) {
@@ -254,7 +254,9 @@ func (svc *CommanderService) prepareIntance(
 	}
 
 	function, err := svc.db.FunctionByID(ctx, funcId)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) {
+		return routing.Routing{}, ErrFunctionNotFound
+	} else if err != nil {
 		return routing.Routing{}, fmt.Errorf(
 			"failed to read function by id %q: %w",
 			functionId, err,
