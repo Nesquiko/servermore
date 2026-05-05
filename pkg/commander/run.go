@@ -44,7 +44,7 @@ func (c CommanderConfig) GrpcAddr() string {
 	return net.JoinHostPort(c.Host, c.GrpcPort)
 }
 
-func Run(ctx context.Context, conf CommanderConfig) error {
+func Run(ctx context.Context, cache caching.RoutingCache, conf CommanderConfig) error {
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
@@ -69,7 +69,6 @@ func Run(ctx context.Context, conf CommanderConfig) error {
 		return fmt.Errorf("failed to initialize db: %w", err)
 	}
 
-	routingCache := caching.NewInMemoryCache()
 	router := routing.NewNaiveRouter(
 		conf.InstanceOverloadedQueueSize,
 		conf.RunnerOverloadedQueueSize,
@@ -77,7 +76,7 @@ func Run(ctx context.Context, conf CommanderConfig) error {
 	svc := NewCommanderService(
 		db,
 		funcStorage,
-		routingCache,
+		cache,
 		router,
 		CommanderServiceConfig{RunnerClientOpts: server.MonitoringOpts{Env: conf.Env}},
 	)

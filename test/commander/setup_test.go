@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Nesquiko/servermore/pkg/caching"
 	"github.com/Nesquiko/servermore/pkg/commander"
 	"github.com/Nesquiko/servermore/pkg/server"
 	testutils "github.com/Nesquiko/servermore/test/test_utils"
@@ -23,6 +24,7 @@ var (
 	TestStorageRoot string
 	DbFilePath      string
 	TestQueries     testqueries.Querier
+	TestCache       *caching.InMemoryCache
 )
 
 func TestMain(m *testing.M) {
@@ -62,9 +64,11 @@ func TestMain(m *testing.M) {
 	HttpServerUrl = fmt.Sprintf("http://%s:%s", config.Host, config.HttpPort)
 	GrcpServerUrl = config.GrpcAddr()
 
+	TestCache := caching.NewInMemoryCache()
+
 	runErrCh := make(chan error, 1)
 	go func() {
-		runErrCh <- commander.Run(ctx, config)
+		runErrCh <- commander.Run(ctx, TestCache, config)
 	}()
 
 	var eg errgroup.Group
