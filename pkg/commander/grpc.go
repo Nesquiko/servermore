@@ -72,3 +72,11 @@ func (c *commanderGrpcServer) RouteFunction(
 		InstanceId: routingData.InstanceId,
 	}, nil
 }
+
+func (c *commanderGrpcServer) Hello(
+	ctx context.Context,
+	req *HelloRequest,
+) (*HelloResponse, error) {
+
+	return &HelloResponse{Message: "Hello, World!"}, nil
+}

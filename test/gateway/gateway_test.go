@@ -8,45 +8,52 @@ import (
 	"time"
 
 	"github.com/Nesquiko/servermore/pkg/gateway"
+	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
+	testutils "github.com/Nesquiko/servermore/test/test_utils" // Uprav import podľa tvojej štruktúry
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-func TestProcessFunctionRequest(t *testing.T) {
-	// 1. Create a cancelable context so we can stop the server after the test
+func TestGatewayFullFlow(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opts := server.MonitoringOpts{
-		AppName:    "gateway",
-		AppVersion: "0.0.1",
-		Env:        "LOCAL",
-	}
+	// 1. Spusti Runner a nastav mu, čo má vrátiť na HTTP volanie
+	runner := testutils.RunStubRunner(ctx)
+	defer runner.Close()
+	runner.SetInvoke(&runnergrpc.InvokeInstanceResponse{
+		StatusCode: 200,
+		Body:       []byte("Hello from Runner!"),
+		Headers:    map[string]string{"Content-Type": "text/plain"},
+	}, nil)
 
-	gateway_cfg := gateway.GatewayConfig{}
+	// 2. Spusti Commander a povedz mu, že má posielať requesty na ten Runner
+	commanderStub := testutils.RunStubCommander(ctx)
+	commanderStub.FixedRunnerAddr = runner.GrpcAddr()
+	commanderStub.FixedInstanceID = "instance-abc"
+	defer commanderStub.Close()
 
-	// 2. Start the server in a goroutine (background)
+	// 3. Spusti Gateway (v gorutine)
 	go func() {
-		_ = gateway.Run(ctx, opts, gateway_cfg)
+		opts := server.MonitoringOpts{AppName: "gateway-test"}
+		cfg := gateway.GatewayConfig{CommanderAddr: commanderStub.GrpcAddr()}
+		_ = gateway.Run(ctx, opts, cfg)
 	}()
 
-	// 3. Give the server a moment to start up
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond) // Počkaj na štart
 
-	// 4. Call the endpoint using a standard HTTP client
-	url := "http://localhost:42069/my-function/some/path"
-	resp, err := http.Post(url, "application/json", nil)
-
-	require.NoError(t, err, "Failed to call gateway")
+	// 4. Pošli HTTP request na Gateway
+	resp, err := http.Post("http://localhost:42069/my-function/some-path", "application/json", nil)
+	assert.NoError(t, err)
 	defer resp.Body.Close()
 
-	// 5. Read and check the response
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-
+	// 5. Overenie
+	body, _ := io.ReadAll(resp.Body)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "Hello from Runner!", string(body))
 
-	expected := "hi, you are calling function 'my-function' with endpoint 'some/path'"
-	assert.Equal(t, expected, string(body))
+	// Over, či Gateway poslala správne InstanceID a cestu do gRPC
+	lastReq := runner.LastInvoke()
+	assert.Equal(t, "instance-abc", lastReq.InstanceId)
+	assert.Equal(t, "/my-function/some-path", lastReq.Path)
 }

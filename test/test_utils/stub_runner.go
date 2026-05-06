@@ -32,6 +32,11 @@ type StubRunner struct {
 	prepareResp       *runnergrpc.PrepareInstanceResponse
 	prepareError      error
 	prepareCallsCount atomic.Int64
+
+	invokeConfigured bool
+	invokeResp       *runnergrpc.InvokeInstanceResponse
+	invokeError      error
+	lastInvoke       *runnergrpc.InvokeInstanceRequest
 }
 
 func RunStubRunner(ctx context.Context) *StubRunner {
@@ -229,9 +234,39 @@ func (s *StubRunner) PrepareFunctionInstance(
 	return resp, nil
 }
 
+func (s *StubRunner) SetInvoke(resp *runnergrpc.InvokeInstanceResponse, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.invokeResp = resp
+	s.invokeError = err
+	s.invokeConfigured = true
+}
+
+func (s *StubRunner) LastInvoke() *runnergrpc.InvokeInstanceRequest {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastInvoke
+}
+
 func (s *StubRunner) InvokeFunctionInstance(
-	context.Context,
-	*runnergrpc.InvokeInstanceRequest,
+	ctx context.Context,
+	req *runnergrpc.InvokeInstanceRequest,
 ) (*runnergrpc.InvokeInstanceResponse, error) {
-	panic("InvokeFunctionInstance should not be called in stub runner")
+	s.mu.Lock()
+	s.lastInvoke = req
+	configured := s.invokeConfigured
+	resp := s.invokeResp
+	invokeErr := s.invokeError
+	s.mu.Unlock()
+
+	if !configured {
+		panic("InvokeFunctionInstance called in stub runner without configuring it")
+	}
+
+	if invokeErr != nil {
+		return nil, invokeErr
+	}
+
+	return resp, nil
 }

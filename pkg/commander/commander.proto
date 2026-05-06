@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 package commander;
+
 option go_package = "github.com/Nesquiko/servermore/pkg/commander";
 
 message HeartbeatRequest {}
@@ -31,4 +32,11 @@ service Commander {
   rpc RegisterRunner(RegisterRunnerRequest) returns (RegisterRunnerResponse) {}
 
   rpc RouteFunction(RouteFunctionRequest) returns (RouteFunctionResponse) {}
+
+  rpc Hello(HelloRequest) returns (HelloResponse) {}
+}
+
+message HelloRequest {}
+message HelloResponse {
+  string message = 1;
 }
