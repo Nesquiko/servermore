@@ -32,11 +32,4 @@ service Commander {
   rpc RegisterRunner(RegisterRunnerRequest) returns (RegisterRunnerResponse) {}
 
   rpc RouteFunction(RouteFunctionRequest) returns (RouteFunctionResponse) {}
-
-  rpc Hello(HelloRequest) returns (HelloResponse) {}
-}
-
-message HelloRequest {}
-message HelloResponse {
-  string message = 1;
 }

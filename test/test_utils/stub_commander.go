@@ -233,10 +233,3 @@ func (s *StubCommander) DownloadFunctionBinary(
 		return
 	}
 }
-
-func (s *StubCommander) Hello(
-	ctx context.Context,
-	req *commander.HelloRequest,
-) (*commander.HelloResponse, error) {
-	return &commander.HelloResponse{Message: "Hello World!"}, nil
-}
