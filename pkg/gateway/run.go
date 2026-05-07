@@ -47,6 +47,7 @@ func Run(ctx context.Context, opts server.MonitoringOpts, conf GatewayConfig) er
 		commanderClient: commander.NewCommanderClient(conn),
 		runners:         make(map[string]*grpc.ClientConn),
 	}
+	defer h.closeRunnerConns()
 
 	r := chi.NewRouter()
 	r.Use(middleware.Heartbeat(server.HeartbeatEndpoint))
@@ -106,24 +107,21 @@ func (h *gatewayHandler) processFunctionRequest(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// 2. Pripojíme sa k Runneru (v reálnej appke použi pool pripojení!)
 	runnerConn, err := h.getRunnerConn(routeResp.RunnerAddr)
 
 	if err != nil {
 		server.InternalServerError(w, r, err)
 		return
 	}
-	defer h.closeRunnerConns()
+
 	runnerClient := runner.NewRunnerClient(runnerConn)
 
-	// 3. Prečítame telo HTTP requestu
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		server.InternalServerError(w, r, err)
 		return
 	}
 
-	// 4. Zavoláme funkciu na Runneri cez gRPC
 	invokeResp, err := runnerClient.InvokeFunctionInstance(r.Context(), &runner.InvokeInstanceRequest{
 		InstanceId: routeResp.InstanceId,
 		Method:     r.Method,
@@ -137,7 +135,6 @@ func (h *gatewayHandler) processFunctionRequest(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// 5. Preklopíme odpoveď z gRPC späť na HTTP
 	for k, v := range invokeResp.Headers {
 		w.Header().Set(k, v)
 	}
