@@ -42,7 +42,9 @@ func TestGatewayFullFlow(t *testing.T) {
 	// HTTP request to the Gateway
 	resp, err := http.Post("http://localhost:42069/my-function/some-path", "application/json", nil)
 	assert.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	body, _ := io.ReadAll(resp.Body)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"log/slog"
+	"os"
 
 	"github.com/Nesquiko/servermore/pkg/gateway"
 	"github.com/Nesquiko/servermore/pkg/server"
@@ -18,5 +20,9 @@ func main() {
 	}
 
 	gateway_cfg := gateway.GatewayConfig{}
-	gateway.Run(ctx, opts, gateway_cfg)
+	if err := gateway.Run(ctx, opts, gateway_cfg); err != nil {
+		slog.Error("gateway failed", "error", err)
+		os.Exit(1)
+	}
+
 }

@@ -32,22 +32,29 @@ type gatewayHandler struct {
 
 func Run(ctx context.Context, opts server.MonitoringOpts, conf GatewayConfig) error {
 	otelCfg, shutdown, err := server.InitHttpOTEL(ctx, opts)
-	if err != nil {
-		return fmt.Errorf("failed to initialize OTEL: %w", err)
-	}
-	defer shutdown(ctx)
+	defer func() {
+		if err := shutdown(ctx); err != nil {
+			slog.Error("failed to shutdown OTEL", "error", err)
+		}
+	}()
 
 	conn, err := grpc.NewClient(conf.CommanderAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return fmt.Errorf("failed to connect to commander: %w", err)
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	h := &gatewayHandler{
 		commanderClient: commander.NewCommanderClient(conn),
 		runners:         make(map[string]*grpc.ClientConn),
 	}
-	defer h.closeRunnerConns()
+	defer func() {
+		if err := h.closeRunnerConns(); err != nil {
+			slog.Error("failed to close runner connections", "error", err)
+		}
+	}()
 
 	r := chi.NewRouter()
 	r.Use(middleware.Heartbeat(server.HeartbeatEndpoint))
@@ -139,7 +146,9 @@ func (h *gatewayHandler) processFunctionRequest(w http.ResponseWriter, r *http.R
 		w.Header().Set(k, v)
 	}
 	w.WriteHeader(int(invokeResp.StatusCode))
-	w.Write(invokeResp.Body)
+	if _, err := w.Write(invokeResp.Body); err != nil {
+		slog.Error("failed to write response body", "error", err)
+	}
 }
 
 func flattenHeaders(h http.Header) map[string]string {
