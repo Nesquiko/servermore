@@ -32,6 +32,11 @@ type gatewayHandler struct {
 
 func Run(ctx context.Context, opts server.MonitoringOpts, conf GatewayConfig) error {
 	otelCfg, shutdown, err := server.InitHttpOTEL(ctx, opts)
+	if err != nil {
+		slog.Error("failed to initialize OTEL", "error", err)
+		return fmt.Errorf("failed to initialize OTEL: %w", err)
+	}
+
 	defer func() {
 		if err := shutdown(ctx); err != nil {
 			slog.Error("failed to shutdown OTEL", "error", err)
@@ -97,7 +102,10 @@ func (h *gatewayHandler) closeRunnerConns() error {
 
 	for addr, conn := range h.runners {
 		delete(h.runners, addr)
-		conn.Close()
+		if err := conn.Close(); err != nil {
+			slog.Error("failed to close runner connection", "addr", addr, "error", err)
+			return err
+		}
 	}
 	return nil
 }
