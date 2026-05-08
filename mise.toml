@@ -72,3 +72,14 @@ run = [
 	'protoc --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:. pkg/runner/grpc/runner.proto',
 	'protoc --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:. pkg/commander/commander.proto'
 ]
+
+[tasks.test-gateway]
+description = "Runs gateway tests"
+depends = ['compile']
+usage = '''
+flag "--count <count>" help="How many times to run tests" default="1"
+'''
+run = [
+    'go build -o ./tmp/testing-guest ./test/testing-guest',
+    'go test -v ${usage_count:+-count ${usage_count}} ./test/gateway/...',
+]

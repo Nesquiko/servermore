@@ -34,6 +34,9 @@ type StubCommander struct {
 
 	errorOnPaths   map[server.AbsolutePath]error
 	errorOnPathsMu sync.RWMutex
+
+	FixedRunnerAddr string
+	FixedInstanceID string
 }
 
 func RunStubCommander(ctx context.Context) *StubCommander {
@@ -182,10 +185,13 @@ func (s *StubCommander) RegisterRunner(
 }
 
 func (s *StubCommander) RouteFunction(
-	context.Context,
-	*commander.RouteFunctionRequest,
+	ctx context.Context,
+	req *commander.RouteFunctionRequest,
 ) (*commander.RouteFunctionResponse, error) {
-	panic("RouteFunction should not be called in stub commander")
+	return &commander.RouteFunctionResponse{
+		RunnerAddr: s.FixedRunnerAddr,
+		InstanceId: s.FixedInstanceID,
+	}, nil
 }
 
 // CreateFunction implements [api.ServerInterface].
