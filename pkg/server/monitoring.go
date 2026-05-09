@@ -183,6 +183,8 @@ func InstrumentedGrpcServer(
 	interceptors = append(interceptors, grpcServerLogger(opts))
 	return grpc.NewServer(
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+		grpc.MaxRecvMsgSize(GrpcMaxBytes),
+		grpc.MaxSendMsgSize(GrpcMaxBytes),
 		grpc.ChainUnaryInterceptor(interceptors...),
 	)
 }
@@ -195,6 +197,10 @@ func LoggingGrpcClient(
 		addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(GrpcMaxBytes),
+			grpc.MaxCallSendMsgSize(GrpcMaxBytes),
+		),
 		grpc.WithChainUnaryInterceptor(grpcClientLogger(opts)),
 	)
 }
@@ -204,6 +210,10 @@ func GrpcClient(addr string) (conn *grpc.ClientConn, err error) {
 		addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(GrpcMaxBytes),
+			grpc.MaxCallSendMsgSize(GrpcMaxBytes),
+		),
 	)
 }
 

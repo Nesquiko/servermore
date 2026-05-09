@@ -58,10 +58,13 @@ func runGrpcStub(ctx context.Context) *StubCommander {
 	assert.NoError(err)
 
 	stub := &StubCommander{
-		storageRoot:    tmpDir,
-		host:           "127.0.0.1",
-		grpcPort:       port,
-		grpcServer:     grpc.NewServer(),
+		storageRoot: tmpDir,
+		host:        "127.0.0.1",
+		grpcPort:    port,
+		grpcServer: grpc.NewServer(
+			grpc.MaxRecvMsgSize(int(server.GrpcMaxBytes)),
+			grpc.MaxSendMsgSize(int(server.GrpcMaxBytes)),
+		),
 		errorOnPaths:   map[server.AbsolutePath]error{},
 		errorOnPathsMu: sync.RWMutex{},
 	}
