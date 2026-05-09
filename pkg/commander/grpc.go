@@ -59,14 +59,25 @@ func (c *commanderGrpcServer) RouteFunction(
 	ctx context.Context,
 	req *commandergrpc.RouteFunctionRequest,
 ) (*commandergrpc.RouteFunctionResponse, error) {
+	startTime := time.Now()
+	meta := &server.RouteFunctionMeta{FunctionID: req.GetFunctionId()}
+	server.SetRouteFunctionMeta(ctx, meta)
+
 	routingData, err := c.commanderService.RouteFunction(ctx, req.GetFunctionId())
 	if errors.Is(err, routing.ErrNoRunnerAvailable) {
+		meta.RouteTook = time.Since(startTime)
 		return nil, status.Error(codes.Unavailable, err.Error())
 	} else if errors.Is(err, ErrFunctionNotFound) {
+		meta.RouteTook = time.Since(startTime)
 		return nil, status.Error(codes.NotFound, err.Error())
 	} else if err != nil {
+		meta.RouteTook = time.Since(startTime)
 		return nil, fmt.Errorf("routing failed: %w", err)
 	}
+
+	meta.RunnerAddr = routingData.RunnerAddr
+	meta.InstanceID = routingData.InstanceId
+	meta.RouteTook = time.Since(startTime)
 
 	return &commandergrpc.RouteFunctionResponse{
 		RunnerAddr: routingData.RunnerAddr,

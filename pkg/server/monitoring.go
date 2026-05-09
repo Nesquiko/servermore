@@ -255,6 +255,11 @@ func grpcLogger(opts MonitoringOpts) (logging.LoggerFunc, []logging.Option) {
 				fields = append(fields, invokeMeta.Fields()...)
 			}
 
+			routeFunctionMeta := GetRouteFunctionMeta(ctx)
+			if routeFunctionMeta != nil {
+				fields = append(fields, routeFunctionMeta.Fields()...)
+			}
+
 			registerRunnerMeta := GetRegisterRunnerMeta(ctx)
 			if registerRunnerMeta != nil {
 				fields = append(fields, registerRunnerMeta.Fields()...)

@@ -12,6 +12,7 @@ type (
 	downloadMetaKey       struct{}
 	instanceStartMetaKey  struct{}
 	invokeMetaKey         struct{}
+	routeFunctionMetaKey  struct{}
 	registerRunnerMetaKey struct{}
 
 	downloadMetaHolder struct {
@@ -24,6 +25,10 @@ type (
 
 	invokeMetaHolder struct {
 		Meta *InvokeMeta
+	}
+
+	routeFunctionMetaHolder struct {
+		Meta *RouteFunctionMeta
 	}
 
 	registerRunnerMetaHolder struct {
@@ -90,6 +95,13 @@ type InvokeMeta struct {
 	ResponseBodyBytes    int
 }
 
+type RouteFunctionMeta struct {
+	FunctionID string
+	RunnerAddr string
+	InstanceID string
+	RouteTook  time.Duration
+}
+
 type RegisterRunnerMeta struct {
 	RunnerAddr        string
 	RunnerID          int64
@@ -125,6 +137,15 @@ func (m InvokeMeta) Fields() logging.Fields {
 	}
 }
 
+func (m RouteFunctionMeta) Fields() logging.Fields {
+	return logging.Fields{
+		"route_function.function_id", m.FunctionID,
+		"route_function.runner_addr", m.RunnerAddr,
+		"route_function.instance_id", m.InstanceID,
+		"route_function.took", m.RouteTook,
+	}
+}
+
 func WithDownloadMetaHolder(
 	ctx context.Context,
 	req any,
@@ -155,6 +176,17 @@ func WithInvokeMetaHolder(
 ) (any, error) {
 	holder := &invokeMetaHolder{}
 	ctx = context.WithValue(ctx, invokeMetaKey{}, holder)
+	return handler(ctx, req)
+}
+
+func WithRouteFunctionMetaHolder(
+	ctx context.Context,
+	req any,
+	info *grpc.UnaryServerInfo,
+	handler grpc.UnaryHandler,
+) (any, error) {
+	holder := &routeFunctionMetaHolder{}
+	ctx = context.WithValue(ctx, routeFunctionMetaKey{}, holder)
 	return handler(ctx, req)
 }
 
@@ -226,6 +258,28 @@ func GetInvokeMeta(ctx context.Context) *InvokeMeta {
 
 func SetInvokeMeta(ctx context.Context, meta *InvokeMeta) {
 	holder, ok := ctx.Value(invokeMetaKey{}).(*invokeMetaHolder)
+	if !ok {
+		return
+	} else if holder == nil {
+		return
+	}
+
+	holder.Meta = meta
+}
+
+func GetRouteFunctionMeta(ctx context.Context) *RouteFunctionMeta {
+	holder, ok := ctx.Value(routeFunctionMetaKey{}).(*routeFunctionMetaHolder)
+	if !ok {
+		return nil
+	} else if holder == nil {
+		return nil
+	}
+
+	return holder.Meta
+}
+
+func SetRouteFunctionMeta(ctx context.Context, meta *RouteFunctionMeta) {
+	holder, ok := ctx.Value(routeFunctionMetaKey{}).(*routeFunctionMetaHolder)
 	if !ok {
 		return
 	} else if holder == nil {
