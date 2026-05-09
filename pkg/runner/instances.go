@@ -64,14 +64,15 @@ func (is *instanceState) AddToQueue(req InvocationRequest) <-chan *InvocationRes
 
 	resCh := make(chan *InvocationResult)
 	is.ResetTimer()
-	is.queue <- invocation{req: req, resCh: resCh}
+	is.queue <- invocation{req: req, resCh: resCh, enqueuedAt: time.Now()}
 
 	return resCh
 }
 
 type invocation struct {
-	req   InvocationRequest
-	resCh chan *InvocationResult
+	req        InvocationRequest
+	resCh      chan *InvocationResult
+	enqueuedAt time.Time
 }
 
 type InvocationRequest struct {
@@ -82,8 +83,10 @@ type InvocationRequest struct {
 }
 
 type InvocationResult struct {
-	resp *runnergrpc.InvokeInstanceResponse
-	err  error
+	resp            *runnergrpc.InvokeInstanceResponse
+	err             error
+	queueWaitTook   time.Duration
+	guestInvokeTook time.Duration
 }
 
 func NewInstanceStates() *InstancesStates {

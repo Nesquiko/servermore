@@ -54,7 +54,10 @@ func (n *nativeRuntime) Start(
 ) error {
 	startTime := time.Now()
 	meta := server.GetInstanceStartMeta(ctx)
-	assert.That(meta != nil, "instance start meta was nil")
+	assert.That(meta != nil, "meta was nil")
+	defer func() {
+		meta.StartTook = time.Since(startTime)
+	}()
 
 	port, err := FreePort()
 	if err != nil {
@@ -64,7 +67,8 @@ func (n *nativeRuntime) Start(
 	instanceAddr := fmt.Sprintf("127.0.0.1:%d", port)
 	meta.InstanceAddr = instanceAddr
 
-	instanceCmd, err := startWithRetry(funcPath, instanceAddr)
+	instanceCmd, startRetries, err := startWithRetry(funcPath, instanceAddr)
+	meta.StartRetries = startRetries
 	if err != nil {
 		return fmt.Errorf("failed to start the binary: %w", err)
 	}
@@ -75,21 +79,23 @@ func (n *nativeRuntime) Start(
 	}
 	instanceClient := guest.NewGuestClient(conn)
 
-	readyCh := make(chan error, 1)
+	readyCh := make(chan heartbeatReadyResult, 1)
 	go func() {
-		readyCh <- waitForHeartbeat(ctx, instanceClient)
+		took, retries, err := waitForHeartbeat(ctx, instanceClient)
+		readyCh <- heartbeatReadyResult{took: took, retries: retries, err: err}
 	}()
 
-	readyErr := <-readyCh
-	if readyErr != nil {
+	readyResult := <-readyCh
+	meta.HeartbeatTook = readyResult.took
+	meta.HeartbeatRetries = readyResult.retries
+	if readyResult.err != nil {
 		server.Close(conn)
 		closeCmd(instanceCmd)
-		meta.StartTook = time.Since(startTime)
 		return fmt.Errorf(
 			"instance binary %q at addr %q Heartbeat failed: %w",
 			funcPath,
 			instanceAddr,
-			readyErr,
+			readyResult.err,
 		)
 	}
 
@@ -97,7 +103,6 @@ func (n *nativeRuntime) Start(
 	n.addr = instanceAddr
 	n.client = instanceClient
 	n.conn = conn
-	meta.StartTook = time.Since(startTime)
 	return nil
 }
 
@@ -146,37 +151,49 @@ const (
 	HeartbeatTimeout = 5 * time.Second
 )
 
-func waitForHeartbeat(ctx context.Context, client guest.GuestClient) error {
+func waitForHeartbeat(ctx context.Context, client guest.GuestClient) (time.Duration, int, error) {
+	startTime := time.Now()
 	timer := time.NewTimer(HeartbeatTimeout)
 	defer timer.Stop()
 
-	retries := 0
+	attempts := 0
 	errs := make([]error, 0)
 	for {
-		retries++
+		attempts++
 
 		_, err := client.Heartbeat(ctx, &guest.HeartbeatRequest{})
 		if nil == err {
-			return nil
+			return time.Since(startTime), attempts - 1, nil
 		}
 		errs = append(errs, err)
 
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return time.Since(startTime), attempts - 1, ctx.Err()
 		case <-timer.C:
-			return fmt.Errorf("heartbeat didn't succed, errors: %+v", errs)
-		case <-time.After(time.Duration(retries) * 10 * time.Millisecond):
+			return time.Since(
+					startTime,
+				), attempts - 1, fmt.Errorf(
+					"heartbeat didn't succed, errors: %+v",
+					errs,
+				)
+		case <-time.After(time.Duration(attempts) * 10 * time.Millisecond):
 		}
 	}
 }
 
 const MaxStartRetries = 10
 
-func startWithRetry(funcPath server.AbsolutePath, instanceAddr string) (*exec.Cmd, error) {
-	retries := 0
+type heartbeatReadyResult struct {
+	took    time.Duration
+	retries int
+	err     error
+}
+
+func startWithRetry(funcPath server.AbsolutePath, instanceAddr string) (*exec.Cmd, int, error) {
+	attempts := 0
 	for {
-		retries++
+		attempts++
 
 		instanceCmd := exec.Command(funcPath)
 		instanceCmd.Env = append(
@@ -186,14 +203,14 @@ func startWithRetry(funcPath server.AbsolutePath, instanceAddr string) (*exec.Cm
 
 		err := instanceCmd.Start()
 		if nil == err {
-			return instanceCmd, nil
+			return instanceCmd, attempts - 1, nil
 		} else if !errors.Is(err, syscall.ETXTBSY) {
-			return nil, fmt.Errorf("retry failed with not ETXTBSY error: %w", err)
+			return nil, attempts - 1, fmt.Errorf("retry failed with not ETXTBSY error: %w", err)
 		}
 
-		if retries >= MaxStartRetries {
-			return nil, fmt.Errorf("starting cmd failed multiple times: %w", err)
+		if attempts >= MaxStartRetries {
+			return nil, attempts - 1, fmt.Errorf("starting cmd failed multiple times: %w", err)
 		}
-		time.Sleep(time.Duration(retries) * 10 * time.Millisecond)
+		time.Sleep(time.Duration(attempts) * 10 * time.Millisecond)
 	}
 }

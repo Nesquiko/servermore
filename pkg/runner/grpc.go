@@ -293,6 +293,8 @@ func (r *runnerGrpcServer) InvokeFunctionInstance(
 		return nil, ctx.Err()
 	case result := <-respCh:
 		meta.InvocationTook = time.Since(startTime)
+		meta.QueueWaitTook = result.queueWaitTook
+		meta.GuestInvokeTook = result.guestInvokeTook
 		if result.err != nil {
 			return result.resp, result.err
 		}
@@ -325,11 +327,14 @@ outer:
 				break outer
 			}
 
+			queueWaitTook := time.Since(req.enqueuedAt)
+			guestStart := time.Now()
 			resp, err := instance.runtime.Invoke(instance.workerCtx, &guest.InvocationRequest{Method: req.req.Method, Path: req.req.Path, Headers: req.req.Headers, Body: req.req.Body})
+			guestInvokeTook := time.Since(guestStart)
 			if err != nil {
-				req.resCh <- &InvocationResult{err: err}
+				req.resCh <- &InvocationResult{err: err, queueWaitTook: queueWaitTook, guestInvokeTook: guestInvokeTook}
 			} else {
-				req.resCh <- &InvocationResult{resp: &runnergrpc.InvokeInstanceResponse{StatusCode: resp.StatusCode, Headers: resp.Headers, Body: resp.Body}}
+				req.resCh <- &InvocationResult{resp: &runnergrpc.InvokeInstanceResponse{StatusCode: resp.StatusCode, Headers: resp.Headers, Body: resp.Body}, queueWaitTook: queueWaitTook, guestInvokeTook: guestInvokeTook}
 			}
 
 			if !timer.Reset(WorkerIdleTimeout) {
@@ -362,6 +367,10 @@ func (r *runnerGrpcServer) downloadFunction(
 
 	responseFuncPath := resp.Header.Get(commander.DownloadHeaderFunctionPath)
 	responseFuncName := resp.Header.Get(commander.DownloadHeaderFunctionFilename)
+	meta := server.GetDownloadMeta(ctx)
+	assert.That(meta != nil, "meta was nil")
+	meta.SourcePath = responseFuncPath
+	meta.SourceFilename = responseFuncName
 
 	funcPath := r.pathOnRunner(filepath.Join(responseFuncPath, responseFuncName))
 	funcDir := filepath.Dir(funcPath)

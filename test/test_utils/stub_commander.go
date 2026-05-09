@@ -95,7 +95,12 @@ func runHttpStub(ctx context.Context, stub *StubCommander, opts server.Monitorin
 
 	r := chi.NewMux()
 	r.Use(middleware.Heartbeat(server.HeartbeatEndpoint))
-	r.Use(server.HttpMiddleware(metric.BaseConfig{}, opts)...)
+	r.Use(server.HttpMiddleware(
+		metric.BaseConfig{},
+		opts,
+		server.WithCreateFunctionMetaHolder,
+		server.WithDownloadFunctionBinaryMetaHolder,
+	)...)
 
 	h := api.HandlerFromMux(stub, r)
 	h = server.WithAPIErrorHolder(h)
