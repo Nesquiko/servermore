@@ -1,0 +1,68 @@
+services:
+  commander:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.commander
+    command: ["--config", "/config/commander.local-test.yaml"]
+    ports:
+      - "42069:42069"
+      - "42070:42070"
+    volumes:
+      - ./commander.local-test.yaml:/config/commander.local-test.yaml:ro
+      - commander-data:/data
+    restart: on-failure
+
+  runner-1:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runner
+    command: ["--config", "/config/runner-1.local-test.yaml"]
+    depends_on:
+      - commander
+    volumes:
+      - ./runner-1.local-test.yaml:/config/runner-1.local-test.yaml:ro
+      - runner-1-data:/data
+    restart: on-failure
+
+  runner-2:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runner
+    command: ["--config", "/config/runner-2.local-test.yaml"]
+    depends_on:
+      - commander
+    volumes:
+      - ./runner-2.local-test.yaml:/config/runner-2.local-test.yaml:ro
+      - runner-2-data:/data
+    restart: on-failure
+
+  runner-3:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runner
+    command: ["--config", "/config/runner-3.local-test.yaml"]
+    depends_on:
+      - commander
+    volumes:
+      - ./runner-3.local-test.yaml:/config/runner-3.local-test.yaml:ro
+      - runner-3-data:/data
+    restart: on-failure
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.gateway
+    command: ["--config", "/config/gateway.local-test.yaml"]
+    depends_on:
+      - commander
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./gateway.local-test.yaml:/config/gateway.local-test.yaml:ro
+    restart: on-failure
+
+volumes:
+  commander-data:
+  runner-1-data:
+  runner-2-data:
+  runner-3-data:

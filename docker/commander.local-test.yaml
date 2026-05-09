@@ -1,0 +1,10 @@
+AppName: commander
+Env: LOCAL
+Host: 0.0.0.0
+HttpPort: "42069"
+GrpcPort: "42070"
+DbURI: /data/commander.db
+FuncStorageRoot: /data/functions
+RunnerHeartbeatPoll: 250ms
+RunnerOverloadedQueueSize: 256
+InstanceOverloadedQueueSize: 8

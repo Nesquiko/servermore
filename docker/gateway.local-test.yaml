@@ -1,0 +1,10 @@
+AppName: gateway
+Env: LOCAL
+Address: 0.0.0.0:8080
+CommanderAddr: commander:42070
+CommanderClientMonitoringOpts:
+  Env: LOCAL
+  AppName: gateway
+RunnerClientMonitoringOpts:
+  Env: LOCAL
+  AppName: gateway

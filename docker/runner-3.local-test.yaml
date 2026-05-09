@@ -1,0 +1,10 @@
+AppName: runner-3
+CommitHash: local-test
+Env: LOCAL
+Addr: runner-3:42071
+CommanderHost: commander
+CommanderHttpPort: "42069"
+CommanderGrpcPort: "42070"
+InstanceShutdownAfter: 10m
+InstanceGracePeriod: 1s
+FuncStorageRoot: /data/functions
