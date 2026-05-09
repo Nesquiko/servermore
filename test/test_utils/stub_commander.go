@@ -36,8 +36,10 @@ type StubCommander struct {
 	errorOnPaths   map[server.AbsolutePath]error
 	errorOnPathsMu sync.RWMutex
 
-	FixedRunnerAddr string
-	FixedInstanceID string
+	routeMu         sync.RWMutex
+	routeRunnerAddr string
+	routeInstanceID string
+	routeErr        error
 }
 
 func RunStubCommander(ctx context.Context) *StubCommander {
@@ -192,10 +194,42 @@ func (s *StubCommander) RouteFunction(
 	context.Context,
 	*commandergrpc.RouteFunctionRequest,
 ) (*commandergrpc.RouteFunctionResponse, error) {
+	s.routeMu.RLock()
+	runnerAddr := s.routeRunnerAddr
+	instanceID := s.routeInstanceID
+	routeErr := s.routeErr
+	s.routeMu.RUnlock()
+
+	if routeErr != nil {
+		return nil, routeErr
+	}
+
 	return &commandergrpc.RouteFunctionResponse{
-		RunnerAddr: s.FixedRunnerAddr,
-		InstanceId: s.FixedInstanceID,
+		RunnerAddr: runnerAddr,
+		InstanceId: instanceID,
 	}, nil
+}
+
+func (s *StubCommander) SetRouteResponse(runnerAddr string, instanceID string) {
+	s.routeMu.Lock()
+	s.routeRunnerAddr = runnerAddr
+	s.routeInstanceID = instanceID
+	s.routeErr = nil
+	s.routeMu.Unlock()
+}
+
+func (s *StubCommander) SetRouteError(err error) {
+	s.routeMu.Lock()
+	s.routeErr = err
+	s.routeMu.Unlock()
+}
+
+func (s *StubCommander) ClearRouteConfig() {
+	s.routeMu.Lock()
+	s.routeRunnerAddr = ""
+	s.routeInstanceID = ""
+	s.routeErr = nil
+	s.routeMu.Unlock()
 }
 
 // CreateFunction implements [api.ServerInterface].

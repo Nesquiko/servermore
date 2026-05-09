@@ -30,9 +30,10 @@ func TestMain(m *testing.M) {
 
 	gatewayAddr := fmt.Sprintf("127.0.0.1:%s", port)
 	config := gateway.GatewayConfig{
-		Env:     server.TEST,
-		AppName: "testing-gateway",
-		Address: gatewayAddr,
+		Env:           server.TEST,
+		AppName:       "testing-gateway",
+		Address:       gatewayAddr,
+		CommanderAddr: StubCommander.GrpcAddr(),
 	}
 
 	runErrCh := make(chan error, 1)
