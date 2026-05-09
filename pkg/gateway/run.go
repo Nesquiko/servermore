@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -45,7 +44,12 @@ func Run(ctx context.Context, conf GatewayConfig) error {
 		slog.Error("failed to initialize OTEL", "error", err)
 		return fmt.Errorf("failed to initialize OTEL: %w", err)
 	}
-	defer server.CloseWithCtx(ctx, otelShutdown)
+
+	defer func() {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		server.CloseWithCtx(shutdownCtx, otelShutdown)
+	}()
 
 	commanderClient, conn, err := commandergrpc.CreateCommanderClient(
 		conf.CommanderAddr,
@@ -56,9 +60,17 @@ func Run(ctx context.Context, conf GatewayConfig) error {
 	}
 	defer server.Close(conn)
 
+	h, httpHandler := createHttpHandler(
+		commanderClient,
+		otelCfg,
+		monitoringOpts,
+		conf.RunnerClientMonitoringOpts,
+	)
+	defer h.Close()
+
 	httpServer := &http.Server{
 		Addr:    conf.Address,
-		Handler: handler(commanderClient, otelCfg, monitoringOpts, conf.RunnerClientMonitoringOpts),
+		Handler: httpHandler,
 	}
 
 	errCh := make(chan error, 1)
@@ -86,19 +98,15 @@ func Run(ctx context.Context, conf GatewayConfig) error {
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
-
-	return errors.Join(
-		httpServer.Shutdown(shutdownCtx),
-		otelShutdown(shutdownCtx),
-	)
+	return httpServer.Shutdown(shutdownCtx)
 }
 
-func handler(
+func createHttpHandler(
 	commanderClient commandergrpc.CommanderClient,
 	otelCfg otelchimetric.BaseConfig,
 	monitoringOpts server.MonitoringOpts,
 	runnerMonitoringOpts server.MonitoringOpts,
-) http.Handler {
+) (*gatewayHandler, http.Handler) {
 	r := chi.NewRouter()
 	baseUrl := fmt.Sprintf("/{%s}", FunctionIdPathParam)
 
@@ -116,5 +124,5 @@ func handler(
 		r.HandleFunc("/*", h.processFunctionRequest)
 	})
 
-	return r
+	return h, r
 }

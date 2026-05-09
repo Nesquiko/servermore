@@ -124,7 +124,7 @@ func (h *gatewayHandler) runnerConn(addr string) (*grpc.ClientConn, error) {
 	return newConn, nil
 }
 
-func (h *gatewayHandler) closeRunnerConns() {
+func (h *gatewayHandler) Close() {
 	h.runnersMu.Lock()
 	defer h.runnersMu.Unlock()
 
