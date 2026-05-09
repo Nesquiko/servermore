@@ -15,6 +15,7 @@ import (
 	api "github.com/Nesquiko/servermore/pkg/api/commander"
 	"github.com/Nesquiko/servermore/pkg/assert"
 	"github.com/Nesquiko/servermore/pkg/caching"
+	commandergrpc "github.com/Nesquiko/servermore/pkg/commander/grpc"
 	"github.com/Nesquiko/servermore/pkg/routing"
 	"github.com/Nesquiko/servermore/pkg/server"
 	"github.com/go-chi/chi/v5"
@@ -179,7 +180,7 @@ func runGrpc(
 	// lis.Close by the grpcServer
 
 	grpcServer := server.InstrumentedGrpcServer(monitoringOpts, server.WithRegisterRunnerMetaHolder)
-	RegisterCommanderServer(grpcServer, commanderGrpc)
+	commandergrpc.RegisterCommanderServer(grpcServer, commanderGrpc)
 
 	errCh := make(chan error, 1)
 	go func() {

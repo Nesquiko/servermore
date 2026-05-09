@@ -14,6 +14,7 @@ import (
 	api "github.com/Nesquiko/servermore/pkg/api/commander"
 	"github.com/Nesquiko/servermore/pkg/assert"
 	"github.com/Nesquiko/servermore/pkg/commander"
+	commandergrpc "github.com/Nesquiko/servermore/pkg/commander/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -22,7 +23,7 @@ import (
 )
 
 type StubCommander struct {
-	commander.UnimplementedCommanderServer
+	commandergrpc.UnimplementedCommanderServer
 
 	storageRoot string
 	host        string
@@ -68,7 +69,7 @@ func runGrpcStub(ctx context.Context) *StubCommander {
 
 	listener, err := net.Listen("tcp", stub.GrpcAddr())
 	assert.NoError(err)
-	commander.RegisterCommanderServer(stub.grpcServer, stub)
+	commandergrpc.RegisterCommanderServer(stub.grpcServer, stub)
 
 	go func() {
 		err := stub.grpcServer.Serve(listener)
@@ -171,24 +172,24 @@ func (s *StubCommander) DeleteFile(filename string) {
 
 func (s *StubCommander) Heartbeat(
 	context.Context,
-	*commander.HeartbeatRequest,
-) (*commander.HeartbeatResponse, error) {
-	return &commander.HeartbeatResponse{}, nil
+	*commandergrpc.HeartbeatRequest,
+) (*commandergrpc.HeartbeatResponse, error) {
+	return &commandergrpc.HeartbeatResponse{}, nil
 }
 
 func (s *StubCommander) RegisterRunner(
 	context.Context,
-	*commander.RegisterRunnerRequest,
-) (*commander.RegisterRunnerResponse, error) {
+	*commandergrpc.RegisterRunnerRequest,
+) (*commandergrpc.RegisterRunnerResponse, error) {
 	id := s.runnerID.Add(1)
-	return &commander.RegisterRunnerResponse{RunnerId: id}, nil
+	return &commandergrpc.RegisterRunnerResponse{RunnerId: id}, nil
 }
 
 func (s *StubCommander) RouteFunction(
-	ctx context.Context,
-	req *commander.RouteFunctionRequest,
-) (*commander.RouteFunctionResponse, error) {
-	return &commander.RouteFunctionResponse{
+	context.Context,
+	*commandergrpc.RouteFunctionRequest,
+) (*commandergrpc.RouteFunctionResponse, error) {
+	return &commandergrpc.RouteFunctionResponse{
 		RunnerAddr: s.FixedRunnerAddr,
 		InstanceId: s.FixedInstanceID,
 	}, nil

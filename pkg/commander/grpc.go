@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	commandergrpc "github.com/Nesquiko/servermore/pkg/commander/grpc"
 	"github.com/Nesquiko/servermore/pkg/routing"
 	"github.com/Nesquiko/servermore/pkg/server"
 	codes "google.golang.org/grpc/codes"
@@ -13,12 +14,12 @@ import (
 )
 
 type commanderGrpcServer struct {
-	UnimplementedCommanderServer
+	commandergrpc.UnimplementedCommanderServer
 
 	commanderService *CommanderService
 }
 
-var _ CommanderServer = (*commanderGrpcServer)(nil)
+var _ commandergrpc.CommanderServer = (*commanderGrpcServer)(nil)
 
 func newCommanderGrpcServer(service *CommanderService) (*commanderGrpcServer, func(), error) {
 	closer := func() {}
@@ -28,16 +29,16 @@ func newCommanderGrpcServer(service *CommanderService) (*commanderGrpcServer, fu
 // Heartbeat implements [CommanderServer].
 func (c *commanderGrpcServer) Heartbeat(
 	context.Context,
-	*HeartbeatRequest,
-) (*HeartbeatResponse, error) {
-	return &HeartbeatResponse{}, nil
+	*commandergrpc.HeartbeatRequest,
+) (*commandergrpc.HeartbeatResponse, error) {
+	return &commandergrpc.HeartbeatResponse{}, nil
 }
 
 // RegisterRunner implements [CommanderServer].
 func (c *commanderGrpcServer) RegisterRunner(
 	ctx context.Context,
-	req *RegisterRunnerRequest,
-) (*RegisterRunnerResponse, error) {
+	req *commandergrpc.RegisterRunnerRequest,
+) (*commandergrpc.RegisterRunnerResponse, error) {
 	startTime := time.Now()
 	meta := &server.RegisterRunnerMeta{RunnerAddr: req.GetAddr()}
 	server.SetRegisterRunnerMeta(ctx, meta)
@@ -50,14 +51,14 @@ func (c *commanderGrpcServer) RegisterRunner(
 
 	meta.RegistrationTook = time.Since(startTime)
 
-	return &RegisterRunnerResponse{RunnerId: runn.ID}, err
+	return &commandergrpc.RegisterRunnerResponse{RunnerId: runn.ID}, err
 }
 
 // RouteFunction implements [CommanderServer].
 func (c *commanderGrpcServer) RouteFunction(
 	ctx context.Context,
-	req *RouteFunctionRequest,
-) (*RouteFunctionResponse, error) {
+	req *commandergrpc.RouteFunctionRequest,
+) (*commandergrpc.RouteFunctionResponse, error) {
 	routingData, err := c.commanderService.RouteFunction(ctx, req.GetFunctionId())
 	if errors.Is(err, routing.ErrNoRunnerAvailable) {
 		return nil, status.Error(codes.Unavailable, err.Error())
@@ -67,7 +68,7 @@ func (c *commanderGrpcServer) RouteFunction(
 		return nil, fmt.Errorf("routing failed: %w", err)
 	}
 
-	return &RouteFunctionResponse{
+	return &commandergrpc.RouteFunctionResponse{
 		RunnerAddr: routingData.RunnerAddr,
 		InstanceId: routingData.InstanceId,
 	}, nil

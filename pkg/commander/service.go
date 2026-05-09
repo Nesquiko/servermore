@@ -18,7 +18,6 @@ import (
 	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc"
 )
 
 type CommanderServiceConfig struct {
@@ -85,7 +84,7 @@ func (svc *CommanderService) pollRunnerHeartbeat(
 	runnerCtx, cancel := context.WithTimeout(ctx, runnerHeartbeatTimeout)
 	defer cancel()
 
-	runnerClient, conn, err := newRunnerClient(runn.Addr, svc.config.RunnerClientOpts)
+	runnerClient, conn, err := runnergrpc.CreateRunnerClient(runn.Addr, svc.config.RunnerClientOpts)
 	if err != nil {
 		slog.Error(
 			"failed to create runner client for heartbeat",
@@ -263,7 +262,10 @@ func (svc *CommanderService) prepareInstance(
 		)
 	}
 
-	runnerClient, conn, err := newRunnerClient(runnerAddr, svc.config.RunnerClientOpts)
+	runnerClient, conn, err := runnergrpc.CreateRunnerClient(
+		runnerAddr,
+		svc.config.RunnerClientOpts,
+	)
 	if err != nil {
 		return routing.Routing{}, fmt.Errorf("failed to construct runner client: %w", err)
 	}
@@ -290,7 +292,7 @@ func (svc *CommanderService) persistNewRunner(
 		meta.RunnerAddr = addr
 	}
 
-	runnerClient, conn, err := newRunnerClient(addr, svc.config.RunnerClientOpts)
+	runnerClient, conn, err := runnergrpc.CreateRunnerClient(addr, svc.config.RunnerClientOpts)
 	if err != nil {
 		return queries.Runner{}, fmt.Errorf("initializing runner at %q failed: %w", addr, err)
 	}
@@ -313,24 +315,4 @@ func (svc *CommanderService) persistNewRunner(
 	}
 
 	return runn, nil
-}
-
-func newRunnerClient(
-	addr string,
-	monitoringOpts server.MonitoringOpts,
-) (runnergrpc.RunnerClient, *grpc.ClientConn, error) {
-	opts := server.MonitoringOpts{
-		Env:             monitoringOpts.Env,
-		AppName:         fmt.Sprintf("%s-runner-client-%s", monitoringOpts.AppName, addr),
-		AppVersion:      monitoringOpts.AppName,
-		AdditionalAttrs: monitoringOpts.AdditionalAttrs,
-		Level:           monitoringOpts.Level,
-		OTELOn:          monitoringOpts.OTELOn,
-	}
-	conn, err := server.LoggingGrpcClient(addr, opts)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create runner client for address %q: %w", addr, err)
-	}
-
-	return runnergrpc.NewRunnerClient(conn), conn, nil
 }

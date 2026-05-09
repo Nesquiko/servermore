@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 package runnergrpc;
+
 option go_package = "github.com/Nesquiko/servermore/pkg/runner/grpc";
 
 message HeartbeatRequest {}

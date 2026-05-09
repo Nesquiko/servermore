@@ -15,6 +15,7 @@ import (
 	commanderclient "github.com/Nesquiko/servermore/pkg/api/commander-client"
 	"github.com/Nesquiko/servermore/pkg/assert"
 	"github.com/Nesquiko/servermore/pkg/commander"
+	commandergrpc "github.com/Nesquiko/servermore/pkg/commander/grpc"
 	"github.com/Nesquiko/servermore/pkg/guest"
 	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
@@ -25,7 +26,7 @@ type runnerGrpcServer struct {
 	runnergrpc.UnimplementedRunnerServer
 
 	runnerId            int64
-	commanderGrpcClient commander.CommanderClient
+	commanderGrpcClient commandergrpc.CommanderClient
 	commanderHttpClient *commanderclient.Client
 
 	instances *InstancesStates
@@ -81,9 +82,9 @@ func newRunnerGrpcServer(
 		server.Close(conn)
 	}
 
-	client := commander.NewCommanderClient(conn)
+	client := commandergrpc.NewCommanderClient(conn)
 
-	resp, err := client.RegisterRunner(ctx, &commander.RegisterRunnerRequest{Addr: conf.Addr})
+	resp, err := client.RegisterRunner(ctx, &commandergrpc.RegisterRunnerRequest{Addr: conf.Addr})
 	if err != nil {
 		closer()
 		return nil, nil, fmt.Errorf("registration with commander failed: %w", err)
