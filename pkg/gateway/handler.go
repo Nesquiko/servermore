@@ -3,7 +3,6 @@ package gateway
 import (
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -30,7 +29,16 @@ type gatewayHandler struct {
 func (h *gatewayHandler) processFunctionRequest(w http.ResponseWriter, r *http.Request) {
 	functionId := chi.URLParam(r, FunctionIdPathParam)
 
-	// TODO add check on the function id, if it is ""
+	if functionId == "" {
+		server.EncodeError(w, r, server.Error{
+			Cause:  fmt.Errorf("path parameter %q is required", FunctionIdPathParam),
+			Code:   server.InvalidRequestCode,
+			Detail: fmt.Sprintf("Path parameter %q is required", FunctionIdPathParam),
+			Status: http.StatusBadRequest,
+			Title:  server.InvalidRequestTitle,
+		})
+		return
+	}
 
 	routeResp, err := h.commanderClient.RouteFunction(
 		r.Context(),
@@ -38,15 +46,12 @@ func (h *gatewayHandler) processFunctionRequest(w http.ResponseWriter, r *http.R
 			FunctionId: functionId,
 		},
 	)
-	// TODO user server.Encode things so that the error goes to ctx not this log
 	if err != nil {
-		slog.Error("routing failed", "functionId", functionId, "error", err)
-		server.InternalServerError(w, r, err)
+		server.InternalServerError(w, r, fmt.Errorf("route call failed: %w", err))
 		return
 	}
 
 	runnerConn, err := h.runnerConn(routeResp.RunnerAddr)
-	// TODO user server.Encode things so that the error goes to ctx not this log
 	if err != nil {
 		server.InternalServerError(w, r, err)
 		return
@@ -81,10 +86,8 @@ func (h *gatewayHandler) processFunctionRequest(w http.ResponseWriter, r *http.R
 			Body:       body,
 		},
 	)
-	// TODO user server.Encode things so that the error goes to ctx not this log
 	if err != nil {
-		slog.Error("invocation failed", "instanceId", routeResp.InstanceId, "error", err)
-		server.InternalServerError(w, r, err)
+		server.InternalServerError(w, r, fmt.Errorf("invoke call failed: %w", err))
 		return
 	}
 
@@ -92,9 +95,14 @@ func (h *gatewayHandler) processFunctionRequest(w http.ResponseWriter, r *http.R
 		w.Header().Set(k, v)
 	}
 	w.WriteHeader(int(invokeResp.StatusCode))
-	// TODO user server.Encode things so that the error goes to ctx not this log
 	if _, err := w.Write(invokeResp.Body); err != nil {
-		slog.Error("failed to write response body", "error", err)
+		server.SetAPIError(r, server.NewApiError(r, server.Error{
+			Cause:  err,
+			Code:   "internal.server.error",
+			Detail: "Failed to write response body",
+			Status: http.StatusInternalServerError,
+			Title:  "Internal server error",
+		}))
 	}
 }
 
@@ -135,7 +143,7 @@ func (h *gatewayHandler) Close() {
 }
 
 func forwardedPath(path string, functionId string) string {
-	assert.That(functionId != path, "function id was empty string")
+	assert.That(functionId != "", "function id was empty string")
 
 	trimmed := strings.TrimPrefix(path, "/"+functionId)
 	if trimmed == "" {
