@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Nesquiko/servermore/pkg/assert"
 	commandergrpc "github.com/Nesquiko/servermore/pkg/commander/grpc"
 	"github.com/Nesquiko/servermore/pkg/routing"
 	"github.com/Nesquiko/servermore/pkg/server"
@@ -61,6 +62,7 @@ func (c *commanderGrpcServer) RouteFunction(
 ) (*commandergrpc.RouteFunctionResponse, error) {
 	startTime := time.Now()
 	meta := &server.RouteFunctionMeta{FunctionID: req.GetFunctionId()}
+	assert.That(meta != nil, "meta was nil")
 	server.SetRouteFunctionMeta(ctx, meta)
 
 	routingData, err := c.commanderService.RouteFunction(ctx, req.GetFunctionId())

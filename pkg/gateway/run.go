@@ -118,7 +118,12 @@ func createHttpHandler(
 	}
 
 	r.Use(middleware.Heartbeat(server.HeartbeatEndpoint))
-	r.Use(server.HttpMiddleware(otelCfg, monitoringOpts)...)
+	r.Use(
+		server.HttpMiddleware(
+			otelCfg,
+			monitoringOpts,
+			server.WithGatewayFunctionRequestMetaHolder,
+		)...)
 
 	r.Route(baseUrl, func(r chi.Router) {
 		r.HandleFunc("/*", h.processFunctionRequest)

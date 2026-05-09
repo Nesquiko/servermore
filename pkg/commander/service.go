@@ -58,6 +58,7 @@ func (svc *CommanderService) PollRunnerHeartbeats(
 	ctx context.Context,
 	executedAt time.Time,
 ) error {
+	startedAt := time.Now()
 	runners, err := svc.db.GetAllRunners(ctx)
 	if err != nil {
 		return fmt.Errorf("querying runners failed: %w", err)
@@ -71,7 +72,13 @@ func (svc *CommanderService) PollRunnerHeartbeats(
 		})
 	}
 
-	return eg.Wait()
+	err = eg.Wait()
+	slog.InfoContext(ctx, "runner heartbeat polling completed",
+		slog.Int("runners_checked", len(runners)),
+		slog.Time("executed_at", executedAt),
+		slog.Duration("took", time.Since(startedAt)),
+	)
+	return err
 }
 
 const runnerHeartbeatTimeout = 1 * time.Second
@@ -162,13 +169,26 @@ func (svc *CommanderService) CreateFunction(
 	funcName string,
 	funcBytesReader io.ReadCloser,
 ) (api.Function, error) {
+	meta := server.GetCreateFunctionMeta(ctx)
+	assert.That(meta != nil, "meta was nil")
+	meta.FunctionName = funcName
+
+	var (
+		funcBytes []byte
+		hash      []byte
+		funcPath  string
+	)
+
+	defer server.Close(funcBytesReader)
+
 	funcBytes, err := io.ReadAll(funcBytesReader)
 	if err != nil {
 		return api.Function{}, fmt.Errorf("reading function bytes failed: %w", err)
 	}
-	defer server.Close(funcBytesReader)
 
-	hash := BytesSha256(funcBytes)
+	hash = BytesSha256(funcBytes)
+	meta.FunctionBytes = len(funcBytes)
+	meta.FunctionHash = fmt.Sprintf("%X", hash)
 
 	exists, err := svc.db.FunctionExistsByHash(ctx, hash)
 	if err != nil {
@@ -176,19 +196,22 @@ func (svc *CommanderService) CreateFunction(
 	}
 
 	if exists {
+		meta.FunctionAlreadyExists = true
 		return api.Function{}, ErrFunctionExists
 	}
 
-	funcPath, err := svc.funcStorage.Save(funcName, hash, funcBytes)
+	funcPath, err = svc.funcStorage.Save(funcName, hash, funcBytes)
 	if err != nil {
-		return api.Function{}, err
+		return api.Function{}, fmt.Errorf("failed to save function binary to storage: %w", err)
 	}
+	meta.FunctionPath = funcPath
 
 	newFunc, err := svc.db.CreateFunction(ctx, funcPath, funcName, hash)
 	if err != nil {
 		return api.Function{}, fmt.Errorf("persisting new function failed: %w", err)
 	}
 
+	meta.FunctionID = newFunc.ID
 	return api.Function{Id: newFunc.ID, Name: newFunc.Name}, nil
 }
 
@@ -209,7 +232,7 @@ func (svc *CommanderService) RegisterRunner(
 	addr string,
 ) (queries.Runner, error) {
 	meta := server.GetRegisterRunnerMeta(ctx)
-	assert.That(meta != nil, "no register runner meta set in ctx")
+	assert.That(meta != nil, "meta was nil")
 	meta.RunnerAddr = addr
 
 	run, err := svc.db.RunnerByAddr(ctx, addr)
@@ -229,14 +252,26 @@ func (svc *CommanderService) RouteFunction(
 	ctx context.Context,
 	functionId string,
 ) (routing.Routing, error) {
+	meta := server.GetRouteFunctionMeta(ctx)
+	assert.That(meta != nil, "meta was nil")
+
 	routingData, err := svc.router.Route(ctx, functionId, svc.cache)
 	if errors.Is(err, sql.ErrNoRows) {
 		return routing.Routing{}, ErrFunctionNotFound
-	} else if prepareErr, ok := errors.AsType[*routing.ErrPrepareInstance](err); ok {
-		return svc.prepareInstance(ctx, prepareErr.FunctionId, prepareErr.RunnerAddr)
+	} else if prepareErr, isErr := errors.AsType[*routing.ErrPrepareInstance](err); isErr {
+		meta.PreparedInstance = true
+		prepareStart := time.Now()
+		routingData, err := svc.prepareInstance(ctx, prepareErr.FunctionId, prepareErr.RunnerAddr)
+		meta.PrepareTook = time.Since(prepareStart)
+		meta.RunnerAddr = routingData.RunnerAddr
+		meta.InstanceID = routingData.InstanceId
+		return routingData, err
 	} else if err != nil {
 		return routing.Routing{}, fmt.Errorf("router failed: %w", err)
 	}
+	meta.CacheHit = true
+	meta.RunnerAddr = routingData.RunnerAddr
+	meta.InstanceID = routingData.InstanceId
 	return routingData, nil
 }
 
@@ -288,9 +323,8 @@ func (svc *CommanderService) persistNewRunner(
 	addr string,
 ) (queries.Runner, error) {
 	meta := server.GetRegisterRunnerMeta(ctx)
-	if meta != nil {
-		meta.RunnerAddr = addr
-	}
+	assert.That(meta != nil, "meta was nil")
+	meta.RunnerAddr = addr
 
 	runnerClient, conn, err := runnergrpc.CreateRunnerClient(addr, svc.config.RunnerClientOpts)
 	if err != nil {
@@ -298,21 +332,23 @@ func (svc *CommanderService) persistNewRunner(
 	}
 	defer server.Close(conn)
 
+	heartbeatStartedAt := time.Now()
 	_, err = runnerClient.Heartbeat(ctx, &runnergrpc.HeartbeatRequest{})
+	heartbeatTook := time.Since(heartbeatStartedAt)
+	meta.HeartbeatTook = heartbeatTook
 	if err != nil {
 		return queries.Runner{}, fmt.Errorf("runner at %q heartbeat failed: %w", addr, err)
 	}
-	if meta != nil {
-		meta.RunnerHeartbeatOK = true
-	}
+	meta.RunnerHeartbeatOK = true
 
+	persistStartedAt := time.Now()
 	runn, err := svc.db.CreateRunner(ctx, addr)
+	persistTook := time.Since(persistStartedAt)
+	meta.PersistTook = persistTook
 	if err != nil {
 		return queries.Runner{}, fmt.Errorf("failed to save runner at %q: %w", addr, err)
 	}
-	if meta != nil {
-		meta.RunnerID = runn.ID
-	}
+	meta.RunnerID = runn.ID
 
 	return runn, nil
 }

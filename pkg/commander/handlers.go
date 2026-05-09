@@ -60,6 +60,8 @@ func (c *CommanderHTTPServer) CreateFunction(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	server.SetCreateFunctionMeta(r.Context(), &server.CreateFunctionMeta{FunctionName: funcName})
+
 	newFunc, err := c.service.CreateFunction(r.Context(), funcName, funcBytesReader)
 	if errors.Is(err, ErrFunctionExists) {
 		server.EncodeError(w, r, server.Error{
@@ -84,6 +86,9 @@ func (c *CommanderHTTPServer) DownloadFunctionBinary(
 	r *http.Request,
 	id string,
 ) {
+	meta := &server.DownloadFunctionBinaryMeta{}
+	server.SetDownloadFunctionBinaryMeta(r.Context(), meta)
+
 	funcId, err := strconv.ParseInt(id, 10, 0)
 	if err != nil {
 		server.EncodeError(
@@ -95,6 +100,7 @@ func (c *CommanderHTTPServer) DownloadFunctionBinary(
 		)
 		return
 	}
+	meta.FunctionID = funcId
 
 	function, err := c.service.FunctionByID(r.Context(), funcId)
 	if errors.Is(err, ErrFunctionNotFound) {
@@ -111,6 +117,8 @@ func (c *CommanderHTTPServer) DownloadFunctionBinary(
 		return
 	}
 
+	meta.FunctionPath = function.Path
+	meta.FunctionFilename = filepath.Base(function.Path)
 	file, err := os.Open(function.Path)
 	if err != nil {
 		server.InternalServerError(w, r, fmt.Errorf("open function binary: %w", err))
@@ -119,12 +127,13 @@ func (c *CommanderHTTPServer) DownloadFunctionBinary(
 	defer server.Close(file)
 
 	w.Header().Set(DownloadHeaderFunctionID, strconv.FormatInt(function.ID, 10))
-	w.Header().Set(DownloadHeaderFunctionFilename, filepath.Base(function.Path))
+	w.Header().Set(DownloadHeaderFunctionFilename, meta.FunctionFilename)
 	w.Header().Set(DownloadHeaderFunctionPath, function.Path)
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.WriteHeader(http.StatusOK)
 
-	if _, err := io.Copy(w, file); err != nil {
+	meta.BytesWritten, err = io.Copy(w, file)
+	if err != nil {
 		server.InternalServerError(w, r, fmt.Errorf("stream function binary: %w", err))
 		return
 	}

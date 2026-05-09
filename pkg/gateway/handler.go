@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Nesquiko/servermore/pkg/assert"
 	commandergrpc "github.com/Nesquiko/servermore/pkg/commander/grpc"
@@ -27,7 +28,14 @@ type gatewayHandler struct {
 }
 
 func (h *gatewayHandler) processFunctionRequest(w http.ResponseWriter, r *http.Request) {
+	meta := &server.GatewayFunctionRequestMeta{
+		RequestMethod: r.Method,
+		RequestPath:   r.URL.Path,
+	}
+	server.SetGatewayFunctionRequestMeta(r.Context(), meta)
+
 	functionId := chi.URLParam(r, FunctionIdPathParam)
+	meta.FunctionID = functionId
 
 	if functionId == "" {
 		server.EncodeError(w, r, server.Error{
@@ -40,6 +48,7 @@ func (h *gatewayHandler) processFunctionRequest(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	routeStart := time.Now()
 	routeResp, err := h.commanderClient.RouteFunction(
 		r.Context(),
 		&commandergrpc.RouteFunctionRequest{
@@ -47,18 +56,24 @@ func (h *gatewayHandler) processFunctionRequest(w http.ResponseWriter, r *http.R
 		},
 	)
 	if err != nil {
+		meta.RouteTook = time.Since(routeStart)
 		server.InternalServerError(w, r, fmt.Errorf("route call failed: %w", err))
 		return
 	}
+	meta.RouteTook = time.Since(routeStart)
+	meta.RunnerAddr = routeResp.RunnerAddr
+	meta.InstanceID = routeResp.InstanceId
 
-	runnerConn, err := h.runnerConn(routeResp.RunnerAddr)
+	runnerConn, reused, err := h.runnerConn(routeResp.RunnerAddr)
 	if err != nil {
 		server.InternalServerError(w, r, err)
 		return
 	}
+	meta.RunnerConnReused = reused
 
 	runnerClient := runnergrpc.NewRunnerClient(runnerConn)
 
+	meta.HeadersCount = len(r.Header)
 	r.Body = http.MaxBytesReader(w, r.Body, int64(server.MaxBytes))
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -75,21 +90,29 @@ func (h *gatewayHandler) processFunctionRequest(w http.ResponseWriter, r *http.R
 		server.InternalServerError(w, r, err)
 		return
 	}
+	meta.RequestBodyBytes = len(body)
 
+	invokeRequestPath := forwardedPath(r.URL.Path, functionId)
+	meta.ForwardedPath = invokeRequestPath
+
+	invokeStart := time.Now()
 	invokeResp, err := runnerClient.InvokeFunctionInstance(
 		r.Context(),
 		&runnergrpc.InvokeInstanceRequest{
 			InstanceId: routeResp.InstanceId,
 			Method:     r.Method,
-			Path:       forwardedPath(r.URL.Path, functionId),
+			Path:       invokeRequestPath,
 			Headers:    flattenHeaders(r.Header),
 			Body:       body,
 		},
 	)
+	meta.InvokeTook = time.Since(invokeStart)
 	if err != nil {
 		server.InternalServerError(w, r, fmt.Errorf("invoke call failed: %w", err))
 		return
 	}
+	meta.ResponseStatusCode = int(invokeResp.StatusCode)
+	meta.ResponseBodyBytes = len(invokeResp.Body)
 
 	for k, v := range invokeResp.Headers {
 		w.Header().Set(k, v)
@@ -106,13 +129,13 @@ func (h *gatewayHandler) processFunctionRequest(w http.ResponseWriter, r *http.R
 	}
 }
 
-func (h *gatewayHandler) runnerConn(addr string) (*grpc.ClientConn, error) {
+func (h *gatewayHandler) runnerConn(addr string) (*grpc.ClientConn, bool, error) {
 	// first optimistic check
 	h.runnersMu.RLock()
 	conn, ok := h.runners[addr]
 	h.runnersMu.RUnlock()
 	if ok {
-		return conn, nil
+		return conn, true, nil
 	}
 
 	// second check with the mutex write locked
@@ -120,16 +143,16 @@ func (h *gatewayHandler) runnerConn(addr string) (*grpc.ClientConn, error) {
 	defer h.runnersMu.Unlock()
 
 	if conn, ok := h.runners[addr]; ok {
-		return conn, nil
+		return conn, true, nil
 	}
 
 	newConn, err := server.LoggingGrpcClient(addr, h.runnerMonitoringOpts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize grpc client connection: %w", err)
+		return nil, false, fmt.Errorf("failed to initialize grpc client connection: %w", err)
 	}
 
 	h.runners[addr] = newConn
-	return newConn, nil
+	return newConn, false, nil
 }
 
 func (h *gatewayHandler) Close() {

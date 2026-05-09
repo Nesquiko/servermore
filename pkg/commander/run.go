@@ -179,7 +179,11 @@ func runGrpc(
 	}
 	// lis.Close by the grpcServer
 
-	grpcServer := server.InstrumentedGrpcServer(monitoringOpts, server.WithRegisterRunnerMetaHolder)
+	grpcServer := server.InstrumentedGrpcServer(
+		monitoringOpts,
+		server.WithRegisterRunnerMetaHolder,
+		server.WithRouteFunctionMetaHolder,
+	)
 	commandergrpc.RegisterCommanderServer(grpcServer, commanderGrpc)
 
 	errCh := make(chan error, 1)
@@ -204,7 +208,12 @@ func createMiddleware(
 	otelCfg otelchimetric.BaseConfig,
 	loggingOpts server.MonitoringOpts,
 ) []api.MiddlewareFunc {
-	ms := server.HttpMiddleware(otelCfg, loggingOpts)
+	ms := server.HttpMiddleware(
+		otelCfg,
+		loggingOpts,
+		server.WithCreateFunctionMetaHolder,
+		server.WithDownloadFunctionBinaryMetaHolder,
+	)
 	out := make([]api.MiddlewareFunc, len(ms))
 	for i, m := range ms {
 		out[i] = api.MiddlewareFunc(m)
