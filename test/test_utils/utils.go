@@ -146,7 +146,7 @@ func WaitForGrpcReadyWithTiming(
 	addr string,
 ) error {
 	waitingOpts := server.MonitoringOpts{
-		Env:     "TEST",
+		Env:     server.TEST,
 		AppName: "grpc-ready-check",
 	}
 	startTime := time.Now()

@@ -222,7 +222,7 @@ func newRunnerCheckService(
 		cache,
 		router,
 		commander.CommanderServiceConfig{
-			RunnerClientOpts: server.MonitoringOpts{Env: "TEST", AppName: "runner-check-test"},
+			RunnerClientOpts: server.MonitoringOpts{Env: server.TEST, AppName: "runner-check-test"},
 		},
 	)
 

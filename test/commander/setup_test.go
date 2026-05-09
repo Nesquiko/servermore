@@ -14,6 +14,7 @@ import (
 	commanderapi "github.com/Nesquiko/servermore/pkg/api/commander"
 	"github.com/Nesquiko/servermore/pkg/caching"
 	"github.com/Nesquiko/servermore/pkg/commander"
+	commandergrpc "github.com/Nesquiko/servermore/pkg/commander/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
 	testutils "github.com/Nesquiko/servermore/test/test_utils"
 	testqueries "github.com/Nesquiko/servermore/test/test_utils/queries.gen"
@@ -57,7 +58,7 @@ func TestMain(m *testing.M) {
 
 	TestCommanderConf = commander.CommanderConfig{
 		AppName:                     "test-commander",
-		Env:                         "TEST",
+		Env:                         server.TEST,
 		Host:                        "localhost",
 		HttpPort:                    httpPort,
 		GrpcPort:                    grpcPort,
@@ -122,11 +123,11 @@ func TestMain(m *testing.M) {
 	os.Exit(exitCode)
 }
 
-func newCommanderClient(t *testing.T) commander.CommanderClient {
+func newCommanderClient(t *testing.T) commandergrpc.CommanderClient {
 	t.Helper()
 
 	monitoringOpts := server.MonitoringOpts{
-		Env:             "TEST",
+		Env:             server.TEST,
 		AppName:         "commander-test-client",
 		AdditionalAttrs: map[string]string{"test.name": t.Name()},
 		Level:           slog.LevelDebug,
@@ -138,7 +139,7 @@ func newCommanderClient(t *testing.T) commander.CommanderClient {
 		server.Close(conn)
 	})
 
-	return commander.NewCommanderClient(conn)
+	return commandergrpc.NewCommanderClient(conn)
 }
 
 func submitFunction(

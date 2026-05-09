@@ -26,8 +26,7 @@ import (
 )
 
 type MonitoringOpts struct {
-	// Env value: PROD | TEST | LOCAL
-	Env string
+	Env Environment
 
 	AppName         string
 	AppVersion      string
@@ -63,7 +62,7 @@ func InitOTEL(
 		resource.WithAttributes(
 			semconv.ServiceNameKey.String(opts.AppName),
 			semconv.ServiceVersionKey.String(opts.AppVersion),
-			semconv.DeploymentEnvironmentName(opts.Env),
+			semconv.DeploymentEnvironmentName(string(opts.Env)),
 		),
 	)
 	if err != nil {
@@ -273,7 +272,7 @@ func slogLogger(opts MonitoringOpts, slogOpts *slog.HandlerOptions) *slog.Logger
 		New(slog.NewTextHandler(os.Stdout, slogOpts)).
 		With(
 			slog.String("app", opts.AppName),
-			slog.String("env", opts.Env),
+			slog.String("env", string(opts.Env)),
 		)
 
 	if opts.AppVersion != "" {

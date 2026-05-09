@@ -8,12 +8,13 @@ import (
 
 	"github.com/Nesquiko/servermore/pkg/caching"
 	"github.com/Nesquiko/servermore/pkg/commander"
+	"github.com/Nesquiko/servermore/pkg/server"
 )
 
 func main() {
 	config := commander.CommanderConfig{
 		AppName:                     "commander",
-		Env:                         "LOCAL",
+		Env:                         server.LOCAL,
 		Host:                        "localhost",
 		HttpPort:                    "42069",
 		GrpcPort:                    "42070",

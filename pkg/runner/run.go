@@ -18,7 +18,7 @@ import (
 type RunnerConfig struct {
 	AppName    string
 	CommitHash string
-	Env        string
+	Env        server.Environment
 
 	Addr string
 

@@ -26,7 +26,7 @@ import (
 
 type CommanderConfig struct {
 	AppName string
-	Env     string
+	Env     server.Environment
 
 	Host     string
 	HttpPort string

@@ -40,7 +40,7 @@ func TestMain(m *testing.M) {
 
 	ServerUrl = fmt.Sprintf("127.0.0.1:%s", port)
 	config := runner.RunnerConfig{
-		Env:                   "TEST",
+		Env:                   server.TEST,
 		AppName:               "testing-runner",
 		Addr:                  ServerUrl,
 		CommanderHost:         StubCommander.Host(),
@@ -80,7 +80,11 @@ func TestMain(m *testing.M) {
 
 	StubCommander.Close()
 	if err := os.RemoveAll(filepath.Dir(TestRunnerStorageRoot)); err != nil {
-		slog.Error("failed to remove temp dir", "dir", filepath.Dir(TestRunnerStorageRoot), "error", err)
+		slog.Error(
+			"failed to remove temp dir",
+			"dir", filepath.Dir(TestRunnerStorageRoot),
+			"error", err,
+		)
 	}
 
 	os.Exit(exitCode)
@@ -95,7 +99,7 @@ func newRunnerClientWithLog(t *testing.T, logLevel slog.Level) runnergrpc.Runner
 	t.Helper()
 
 	monitoringOpts := server.MonitoringOpts{
-		Env:             "TEST",
+		Env:             server.TEST,
 		AppName:         "runner-test-client",
 		AdditionalAttrs: map[string]string{"test.name": t.Name()},
 		Level:           logLevel,

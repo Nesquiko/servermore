@@ -2,169 +2,119 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
+	"time"
 
-	"github.com/Nesquiko/servermore/pkg/commander"
-	runner "github.com/Nesquiko/servermore/pkg/runner/grpc"
+	commandergrpc "github.com/Nesquiko/servermore/pkg/commander/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	otelchimetric "github.com/riandyrn/otelchi/metric"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
-const FunctionIdPathParam = "functionId"
-
 type GatewayConfig struct {
-	CommanderAddr string
+	AppName string
+	Env     server.Environment
+
+	Address string
+
+	CommanderAddr                 string
+	CommanderClientMonitoringOpts server.MonitoringOpts
+	RunnerClientMonitoringOpts    server.MonitoringOpts
 }
 
-type gatewayHandler struct {
-	commanderClient commander.CommanderClient
+func Run(ctx context.Context, conf GatewayConfig) error {
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer cancel()
 
-	runnersMu sync.RWMutex
-	runners   map[string]*grpc.ClientConn
-}
+	monitoringOpts := server.MonitoringOpts{
+		Env:     conf.Env,
+		AppName: conf.AppName,
+	}
 
-func Run(ctx context.Context, opts server.MonitoringOpts, conf GatewayConfig) error {
-	otelCfg, shutdown, err := server.InitHttpOTEL(ctx, opts)
+	otelCfg, otelShutdown, err := server.InitHttpOTEL(ctx, monitoringOpts)
 	if err != nil {
 		slog.Error("failed to initialize OTEL", "error", err)
 		return fmt.Errorf("failed to initialize OTEL: %w", err)
 	}
+	defer server.CloseWithCtx(ctx, otelShutdown)
 
-	defer func() {
-		if err := shutdown(ctx); err != nil {
-			slog.Error("failed to shutdown OTEL", "error", err)
-		}
-	}()
-
-	conn, err := grpc.NewClient(conf.CommanderAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	commanderClient, conn, err := commandergrpc.CreateCommanderClient(
+		conf.CommanderAddr,
+		conf.CommanderClientMonitoringOpts,
+	)
 	if err != nil {
 		return fmt.Errorf("failed to connect to commander: %w", err)
 	}
-	defer func() {
-		_ = conn.Close()
+	defer server.Close(conn)
+
+	httpServer := &http.Server{
+		Addr:    conf.Address,
+		Handler: handler(commanderClient, otelCfg, monitoringOpts, conf.RunnerClientMonitoringOpts),
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		slog.Info(
+			"gateway starting",
+			"address", conf.Address,
+			"commander.address", conf.CommanderAddr,
+		)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- err
+		}
+		close(errCh)
 	}()
+
+	select {
+	case <-ctx.Done():
+		slog.Info("interrupt received, shutting down gateway")
+	case err := <-errCh:
+		if err != nil {
+			slog.Error("http server failed", "error", err)
+			return fmt.Errorf("http server failed: %w", err)
+		}
+	}
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+
+	return errors.Join(
+		httpServer.Shutdown(shutdownCtx),
+		otelShutdown(shutdownCtx),
+	)
+}
+
+func handler(
+	commanderClient commandergrpc.CommanderClient,
+	otelCfg otelchimetric.BaseConfig,
+	monitoringOpts server.MonitoringOpts,
+	runnerMonitoringOpts server.MonitoringOpts,
+) http.Handler {
+	r := chi.NewRouter()
+	baseUrl := fmt.Sprintf("/{%s}", FunctionIdPathParam)
 
 	h := &gatewayHandler{
-		commanderClient: commander.NewCommanderClient(conn),
-		runners:         make(map[string]*grpc.ClientConn),
+		commanderClient:      commanderClient,
+		runners:              make(map[string]*grpc.ClientConn),
+		runnersMu:            sync.RWMutex{},
+		runnerMonitoringOpts: runnerMonitoringOpts,
 	}
-	defer func() {
-		if err := h.closeRunnerConns(); err != nil {
-			slog.Error("failed to close runner connections", "error", err)
-		}
-	}()
 
-	r := chi.NewRouter()
 	r.Use(middleware.Heartbeat(server.HeartbeatEndpoint))
-	r.Use(server.HttpMiddleware(otelCfg, opts)...)
+	r.Use(server.HttpMiddleware(otelCfg, monitoringOpts)...)
 
-	r.Route(fmt.Sprintf("/{%s}", FunctionIdPathParam), func(r chi.Router) {
+	r.Route(baseUrl, func(r chi.Router) {
 		r.HandleFunc("/*", h.processFunctionRequest)
 	})
 
-	slog.Info("gateway starting", "port", 42069, "commander", conf.CommanderAddr)
-	return http.ListenAndServe(":42069", r)
-}
-
-func (h *gatewayHandler) getRunnerConn(addr string) (*grpc.ClientConn, error) {
-	h.runnersMu.RLock()
-	conn, ok := h.runners[addr]
-	h.runnersMu.RUnlock()
-	if ok {
-		return conn, nil
-	}
-	h.runnersMu.Lock()
-	defer h.runnersMu.Unlock()
-
-	if conn, ok = h.runners[addr]; ok {
-		return conn, nil
-	}
-
-	newConn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, err
-	}
-
-	h.runners[addr] = newConn
-	return newConn, nil
-}
-
-func (h *gatewayHandler) closeRunnerConns() error {
-	h.runnersMu.Lock()
-	defer h.runnersMu.Unlock()
-
-	for addr, conn := range h.runners {
-		delete(h.runners, addr)
-		if err := conn.Close(); err != nil {
-			slog.Error("failed to close runner connection", "addr", addr, "error", err)
-			return err
-		}
-	}
-	return nil
-}
-
-func (h *gatewayHandler) processFunctionRequest(w http.ResponseWriter, r *http.Request) {
-	functionId := chi.URLParam(r, FunctionIdPathParam)
-
-	routeResp, err := h.commanderClient.RouteFunction(r.Context(), &commander.RouteFunctionRequest{
-		FunctionId: functionId,
-	})
-	if err != nil {
-		slog.Error("routing failed", "functionId", functionId, "error", err)
-		server.InternalServerError(w, r, err)
-		return
-	}
-
-	runnerConn, err := h.getRunnerConn(routeResp.RunnerAddr)
-
-	if err != nil {
-		server.InternalServerError(w, r, err)
-		return
-	}
-
-	runnerClient := runner.NewRunnerClient(runnerConn)
-
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		server.InternalServerError(w, r, err)
-		return
-	}
-
-	invokeResp, err := runnerClient.InvokeFunctionInstance(r.Context(), &runner.InvokeInstanceRequest{
-		InstanceId: routeResp.InstanceId,
-		Method:     r.Method,
-		Path:       r.URL.Path,
-		Headers:    flattenHeaders(r.Header),
-		Body:       body,
-	})
-	if err != nil {
-		slog.Error("invocation failed", "instanceId", routeResp.InstanceId, "error", err)
-		server.InternalServerError(w, r, err)
-		return
-	}
-
-	for k, v := range invokeResp.Headers {
-		w.Header().Set(k, v)
-	}
-	w.WriteHeader(int(invokeResp.StatusCode))
-	if _, err := w.Write(invokeResp.Body); err != nil {
-		slog.Error("failed to write response body", "error", err)
-	}
-}
-
-func flattenHeaders(h http.Header) map[string]string {
-	flat := make(map[string]string)
-	for k, v := range h {
-		if len(v) > 0 {
-			flat[k] = v[0]
-		}
-	}
-	return flat
+	return r
 }

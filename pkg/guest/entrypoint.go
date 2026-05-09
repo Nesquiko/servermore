@@ -45,7 +45,7 @@ func start(f FunctionHandler, sdkLogger *slog.Logger) error {
 	monitoringOpts := server.MonitoringOpts{
 		AppName:    "guest-sdk",
 		AppVersion: "n/a",
-		Env:        "LOCAL",
+		Env:        server.LOCAL,
 	}
 
 	if addr == "" {

@@ -13,16 +13,15 @@ const FunctionIdPathParam = "functionId"
 
 func main() {
 	ctx := context.Background()
-	opts := server.MonitoringOpts{
-		AppName:    "gateway",
-		AppVersion: "0.0.1",
-		Env:        "LOCAL",
-	}
 
-	gateway_cfg := gateway.GatewayConfig{}
-	if err := gateway.Run(ctx, opts, gateway_cfg); err != nil {
+	cfg := gateway.GatewayConfig{
+		AppName:                       "gateway",
+		Env:                           server.LOCAL,
+		Address:                       ":42069",
+		CommanderClientMonitoringOpts: server.MonitoringOpts{Env: server.LOCAL},
+	}
+	if err := gateway.Run(ctx, cfg); err != nil {
 		slog.Error("gateway failed", "error", err)
 		os.Exit(1)
 	}
-
 }
