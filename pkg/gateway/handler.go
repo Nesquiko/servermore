@@ -5,8 +5,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 
+	"github.com/Nesquiko/servermore/pkg/assert"
 	commandergrpc "github.com/Nesquiko/servermore/pkg/commander/grpc"
 	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
@@ -52,8 +54,19 @@ func (h *gatewayHandler) processFunctionRequest(w http.ResponseWriter, r *http.R
 
 	runnerClient := runnergrpc.NewRunnerClient(runnerConn)
 
+	r.Body = http.MaxBytesReader(w, r.Body, int64(server.MaxBytes))
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		if err.Error() == server.LargeBodyErrorStr {
+			server.EncodeError(w, r, server.Error{
+				Cause:  err,
+				Code:   "request.too.large",
+				Title:  "Request body too large",
+				Detail: fmt.Sprintf("Request body must be <= %d bytes", server.MaxBytes),
+				Status: http.StatusRequestEntityTooLarge,
+			})
+			return
+		}
 		server.InternalServerError(w, r, err)
 		return
 	}
@@ -63,7 +76,7 @@ func (h *gatewayHandler) processFunctionRequest(w http.ResponseWriter, r *http.R
 		&runnergrpc.InvokeInstanceRequest{
 			InstanceId: routeResp.InstanceId,
 			Method:     r.Method,
-			Path:       r.URL.Path,
+			Path:       forwardedPath(r.URL.Path, functionId),
 			Headers:    flattenHeaders(r.Header),
 			Body:       body,
 		},
@@ -86,14 +99,21 @@ func (h *gatewayHandler) processFunctionRequest(w http.ResponseWriter, r *http.R
 }
 
 func (h *gatewayHandler) runnerConn(addr string) (*grpc.ClientConn, error) {
+	// first optimistic check
 	h.runnersMu.RLock()
 	conn, ok := h.runners[addr]
 	h.runnersMu.RUnlock()
 	if ok {
 		return conn, nil
 	}
+
+	// second check with the mutex write locked
 	h.runnersMu.Lock()
 	defer h.runnersMu.Unlock()
+
+	if conn, ok := h.runners[addr]; ok {
+		return conn, nil
+	}
 
 	newConn, err := server.LoggingGrpcClient(addr, h.runnerMonitoringOpts)
 	if err != nil {
@@ -104,7 +124,7 @@ func (h *gatewayHandler) runnerConn(addr string) (*grpc.ClientConn, error) {
 	return newConn, nil
 }
 
-func (h *gatewayHandler) closeRunnerConns() error {
+func (h *gatewayHandler) closeRunnerConns() {
 	h.runnersMu.Lock()
 	defer h.runnersMu.Unlock()
 
@@ -112,7 +132,16 @@ func (h *gatewayHandler) closeRunnerConns() error {
 		delete(h.runners, addr)
 		server.Close(conn)
 	}
-	return nil
+}
+
+func forwardedPath(path string, functionId string) string {
+	assert.That(functionId != path, "function id was empty string")
+
+	trimmed := strings.TrimPrefix(path, "/"+functionId)
+	if trimmed == "" {
+		return "/"
+	}
+	return trimmed
 }
 
 func flattenHeaders(h http.Header) map[string]string {
