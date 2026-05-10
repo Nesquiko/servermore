@@ -12,7 +12,19 @@ golangci-lint = "2.11.4"
 
 [tasks.local-test]
 description = "Runs the servmore tester TUI"
-run = 'go run ./cmd/servermore-tester'
+run = '''
+if ! command -v docker >/dev/null 2>&1; then
+	echo 'local-test requires docker and docker compose; they are not maintained by mise.' >&2
+	exit 1
+fi
+
+if ! docker compose version >/dev/null 2>&1; then
+	echo 'local-test requires docker and docker compose; they are not maintained by mise.' >&2
+	exit 1
+fi
+
+go run ./cmd/servermore-tester
+'''
 
 [tasks.compile]
 description = "Generates necessary source files and checks if everything is correct."

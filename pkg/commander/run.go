@@ -27,6 +27,7 @@ import (
 type CommanderConfig struct {
 	AppName string             `yaml:"app_name"`
 	Env     server.Environment `yaml:"env"`
+	OTELOn  bool               `yaml:"otel_on"`
 
 	Host     string `yaml:"host"`
 	HttpPort string `yaml:"http_port"`
@@ -52,6 +53,7 @@ func Run(ctx context.Context, cache caching.RoutingCache, conf CommanderConfig) 
 	monitoringOpts := server.MonitoringOpts{
 		Env:     conf.Env,
 		AppName: conf.AppName,
+		OTELOn:  conf.OTELOn,
 	}
 	server.SetDefaultLogger(monitoringOpts)
 
@@ -80,7 +82,7 @@ func Run(ctx context.Context, cache caching.RoutingCache, conf CommanderConfig) 
 		funcStorage,
 		cache,
 		router,
-		CommanderServiceConfig{RunnerClientOpts: server.MonitoringOpts{Env: conf.Env}},
+		CommanderServiceConfig{RunnerClientOpts: server.MonitoringOpts{Env: conf.Env, AppName: conf.AppName, OTELOn: conf.OTELOn}},
 	)
 	runnerHeartbeatPolling(ctx, conf, svc)
 

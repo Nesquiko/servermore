@@ -1,5 +1,6 @@
 app_name: commander
 env: PROD
+otel_on: true
 host: 0.0.0.0
 http_port: "42069"
 grpc_port: "42070"

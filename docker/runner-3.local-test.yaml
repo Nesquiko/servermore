@@ -1,6 +1,7 @@
 app_name: runner-3
 commit_hash: local-test
 env: PROD
+otel_on: true
 addr: runner-3:42071
 commander_host: commander
 commander_http_port: "42069"

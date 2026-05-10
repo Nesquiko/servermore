@@ -22,6 +22,7 @@ import (
 type GatewayConfig struct {
 	AppName string             `yaml:"app_name"`
 	Env     server.Environment `yaml:"env"`
+	OTELOn  bool               `yaml:"otel_on"`
 
 	Address string `yaml:"address"`
 
@@ -37,6 +38,7 @@ func Run(ctx context.Context, conf GatewayConfig) error {
 	monitoringOpts := server.MonitoringOpts{
 		Env:     conf.Env,
 		AppName: conf.AppName,
+		OTELOn:  conf.OTELOn,
 	}
 	server.SetDefaultLogger(monitoringOpts)
 
@@ -52,9 +54,14 @@ func Run(ctx context.Context, conf GatewayConfig) error {
 		server.CloseWithCtx(shutdownCtx, otelShutdown)
 	}()
 
+	commanderClientOpts := conf.CommanderClientMonitoringOpts
+	commanderClientOpts.OTELOn = conf.OTELOn || commanderClientOpts.OTELOn
+	runnerClientOpts := conf.RunnerClientMonitoringOpts
+	runnerClientOpts.OTELOn = conf.OTELOn || runnerClientOpts.OTELOn
+
 	commanderClient, conn, err := commandergrpc.CreateCommanderClient(
 		conf.CommanderAddr,
-		conf.CommanderClientMonitoringOpts,
+		commanderClientOpts,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to connect to commander: %w", err)
@@ -65,7 +72,7 @@ func Run(ctx context.Context, conf GatewayConfig) error {
 		commanderClient,
 		otelCfg,
 		monitoringOpts,
-		conf.RunnerClientMonitoringOpts,
+		runnerClientOpts,
 	)
 	defer h.Close()
 

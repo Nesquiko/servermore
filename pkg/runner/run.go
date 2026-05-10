@@ -19,6 +19,7 @@ type RunnerConfig struct {
 	AppName    string             `yaml:"app_name"`
 	CommitHash string             `yaml:"commit_hash"`
 	Env        server.Environment `yaml:"env"`
+	OTELOn     bool               `yaml:"otel_on"`
 
 	Addr string `yaml:"addr"`
 
@@ -39,6 +40,7 @@ func Run(ctx context.Context, conf RunnerConfig) error {
 		Env:        conf.Env,
 		AppName:    conf.AppName,
 		AppVersion: conf.CommitHash,
+		OTELOn:     conf.OTELOn,
 	}
 	server.SetDefaultLogger(monitoringOpts)
 
