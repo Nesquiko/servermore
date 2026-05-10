@@ -313,6 +313,11 @@ func (svc *CommanderService) prepareInstance(
 	if err != nil {
 		return routing.Routing{}, fmt.Errorf("prepare instance call failed: %w", err)
 	}
+
+	if err := svc.cache.SetInstance(ctx, functionId, resp.InstanceId, runnerAddr, 0); err != nil {
+		return routing.Routing{}, fmt.Errorf("updating routing cache after prepare failed: %w", err)
+	}
+
 	return routing.Routing{RunnerAddr: runnerAddr, InstanceId: resp.InstanceId}, nil
 }
 

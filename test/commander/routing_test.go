@@ -69,13 +69,9 @@ func TestRouteFunction_PreparesThenReusesExistingInstance(t *testing.T) {
 	})
 
 	t.Run("reuses existing instance", func(t *testing.T) {
-		require.NoError(t, TestCache.SetInstance(
-			ctx,
-			strconv.FormatInt(created.Id, 10),
-			"reused-inst-1",
-			stubRunner.GrpcAddr(),
-			0,
-		))
+		instances, err := TestCache.FunctionIdInstances(ctx, strconv.FormatInt(created.Id, 10))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"prepared-inst-1": 0}, instances)
 
 		client := newCommanderClient(t)
 		routingResp, err := client.RouteFunction(ctx, &commandergrpc.RouteFunctionRequest{
@@ -83,7 +79,7 @@ func TestRouteFunction_PreparesThenReusesExistingInstance(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, stubRunner.GrpcAddr(), routingResp.GetRunnerAddr())
-		assert.Equal(t, "reused-inst-1", routingResp.GetInstanceId())
+		assert.Equal(t, "prepared-inst-1", routingResp.GetInstanceId())
 		assert.EqualValues(t, 1, stubRunner.PrepareCallsCount())
 	})
 
