@@ -128,7 +128,7 @@ func (c *CommanderHTTPServer) DownloadFunctionBinary(
 
 	w.Header().Set(DownloadHeaderFunctionID, strconv.FormatInt(function.ID, 10))
 	w.Header().Set(DownloadHeaderFunctionFilename, meta.FunctionFilename)
-	w.Header().Set(DownloadHeaderFunctionPath, function.Path)
+	w.Header().Set(DownloadHeaderFunctionPath, filepath.Dir(function.Path))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.WriteHeader(http.StatusOK)
 
