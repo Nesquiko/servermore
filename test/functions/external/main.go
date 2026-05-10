@@ -52,7 +52,9 @@ func fetchTodo(ctx context.Context) (todo, string, error) {
 	if err != nil {
 		return todo{}, apiURL, fmt.Errorf("call upstream api: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

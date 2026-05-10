@@ -189,7 +189,7 @@ func doGatewayRequest(
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer server.Close(resp.Body)
 
 	respBody, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
