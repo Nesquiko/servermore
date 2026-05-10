@@ -267,11 +267,9 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "up", "k":
-		m.selectedFunction = clampInt(m.selectedFunction-1, 0, len(m.functions)-1)
-		m.normalizeSelectedField()
+		m.selectedField = clampInt(m.selectedField-1, 0, m.selectedFunctionFieldCount()-1)
 	case "down", "j":
-		m.selectedFunction = clampInt(m.selectedFunction+1, 0, len(m.functions)-1)
-		m.normalizeSelectedField()
+		m.selectedField = clampInt(m.selectedField+1, 0, m.selectedFunctionFieldCount()-1)
 	case "d":
 		if m.dozzleContainerID == "" && !m.dozzleStarting {
 			m.dozzleStarting = true
@@ -279,10 +277,12 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.statusLine = "Starting Dozzle..."
 			return m, startDozzleCmd(m.ctx, m.rootDir)
 		}
-	case "left", "h", "shift+tab":
-		m.selectedField = clampInt(m.selectedField-1, 0, m.selectedFunctionFieldCount()-1)
-	case "right", "l", "tab":
-		m.selectedField = clampInt(m.selectedField+1, 0, m.selectedFunctionFieldCount()-1)
+	case "left", "h":
+		m.selectedFunction = clampInt(m.selectedFunction-1, 0, len(m.functions)-1)
+		m.normalizeSelectedField()
+	case "right", "l":
+		m.selectedFunction = clampInt(m.selectedFunction+1, 0, len(m.functions)-1)
+		m.normalizeSelectedField()
 	case "+", "=":
 		if deployed := m.selectedDeployment(); deployed != nil {
 			deployed.AdjustSetting(m.selectedField, 1)
@@ -450,7 +450,7 @@ func (m *model) renderDashboardView(styles viewStyles) string {
 		),
 		"",
 		styles.Help.Render(
-			"up/down switch functions | left/right choose setting | enter deploy | +/- adjust | d dozzle | q quits",
+			"left/right or h/l switch functions | up/down or k/j choose setting | enter deploy | +/- adjust | d dozzle | q quits",
 		),
 	}
 	return styles.App.Width(maxInt(80, m.width)).Render(strings.Join(parts, "\n"))
