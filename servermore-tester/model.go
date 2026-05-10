@@ -390,8 +390,6 @@ func (m *model) renderSetupView(styles viewStyles) string {
 	body := []string{
 		styles.Title.Render("Servermore Tester"),
 		"",
-		m.renderDozzleStatus(styles),
-		"",
 		styles.SectionTitle.Render(spinner + " " + m.setupStatus),
 		styles.Muted.Render(m.statusLine),
 	}
@@ -419,8 +417,6 @@ func (m *model) renderDeployView(styles viewStyles) string {
 	function := m.functions[m.deployFunctionIndex]
 	sections := []string{
 		styles.Title.Render("Deploy Function"),
-		"",
-		m.renderDozzleStatus(styles),
 		"",
 		styles.Muted.Render("Binary: " + function.requester.BinaryName()),
 		styles.Muted.Render(function.requester.Description()),

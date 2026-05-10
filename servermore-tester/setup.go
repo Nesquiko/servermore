@@ -12,6 +12,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/Nesquiko/servermore/pkg/server"
 )
 
 const (
@@ -247,7 +248,7 @@ func startDozzle(ctx context.Context, rootDir string) (string, string, error) {
 		return "", "", fmt.Errorf("docker run did not return a container id")
 	}
 
-	portOutput, _, err := runCommand(ctx, rootDir, "docker", "port", containerID, dozzlePort)
+	_, portOutput, err := runCommand(ctx, rootDir, "docker", "port", containerID, dozzlePort)
 	if err != nil {
 		return containerID, "", err
 	}
@@ -310,7 +311,7 @@ func checkHTTPReady(ctx context.Context, target string) bool {
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer server.Close(resp.Body)
 
 	return resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusBadRequest
 }

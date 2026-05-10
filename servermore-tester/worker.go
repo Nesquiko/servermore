@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Nesquiko/servermore/pkg/server"
 )
 
 type RequestSettings struct {
@@ -237,7 +239,7 @@ func invokeFunction(
 	if err != nil {
 		return 0, "", fmt.Errorf("invoke %s %s: %w", req.Method, path, err)
 	}
-	defer resp.Body.Close()
+	defer server.Close(resp.Body)
 
 	bodyBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	if readErr != nil {

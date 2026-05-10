@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/Nesquiko/servermore/pkg/server"
 )
 
 type deployDoneMsg struct {
@@ -74,7 +75,7 @@ func deployFunction(ctx context.Context, binaryPath string, name string) (string
 	if err != nil {
 		return "", fmt.Errorf("upload function: %w", err)
 	}
-	defer resp.Body.Close()
+	defer server.Close(resp.Body)
 
 	if resp.StatusCode != http.StatusCreated {
 		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
