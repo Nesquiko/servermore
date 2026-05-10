@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 
 	"github.com/go-chi/httplog/v3"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
@@ -24,6 +25,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/stats"
 )
 
 type MonitoringOpts struct {
@@ -186,9 +188,25 @@ func InstrumentedGrpcServer(
 	opts MonitoringOpts,
 	interceptors ...grpc.UnaryServerInterceptor,
 ) *grpc.Server {
-	interceptors = append(interceptors, grpcServerTraceInterceptor(), grpcServerLogger(opts))
+	return InstrumentedGrpcServerWithExcludedMethodLogs(opts, nil, interceptors...)
+}
+
+func InstrumentedGrpcServerWithExcludedMethodLogs(
+	opts MonitoringOpts,
+	logExcludedMethods []string,
+	interceptors ...grpc.UnaryServerInterceptor,
+) *grpc.Server {
+	interceptors = append(
+		interceptors,
+		grpcServerTraceInterceptor(logExcludedMethods),
+		grpcServerLogger(opts, logExcludedMethods),
+	)
 	return grpc.NewServer(
-		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+		grpc.StatsHandler(
+			otelgrpc.NewServerHandler(otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool {
+				return grpcMethodAllowed(info.FullMethodName, logExcludedMethods)
+			})),
+		),
 		grpc.MaxRecvMsgSize(GrpcMaxBytes),
 		grpc.MaxSendMsgSize(GrpcMaxBytes),
 		grpc.ChainUnaryInterceptor(interceptors...),
@@ -199,15 +217,30 @@ func LoggingGrpcClient(
 	addr string,
 	opts MonitoringOpts,
 ) (conn *grpc.ClientConn, err error) {
+	return LoggingGrpcClientWithExcludedMethodLogs(addr, opts, nil)
+}
+
+func LoggingGrpcClientWithExcludedMethodLogs(
+	addr string,
+	opts MonitoringOpts,
+	logExcludedMethods []string,
+) (conn *grpc.ClientConn, err error) {
 	return grpc.NewClient(
 		addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithStatsHandler(
+			otelgrpc.NewClientHandler(otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool {
+				return grpcMethodAllowed(info.FullMethodName, logExcludedMethods)
+			})),
+		),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(GrpcMaxBytes),
 			grpc.MaxCallSendMsgSize(GrpcMaxBytes),
 		),
-		grpc.WithChainUnaryInterceptor(grpcClientTraceInterceptor(), grpcClientLogger(opts)),
+		grpc.WithChainUnaryInterceptor(
+			grpcClientTraceInterceptor(logExcludedMethods),
+			grpcClientLogger(opts, logExcludedMethods),
+		),
 	)
 }
 
@@ -220,18 +253,36 @@ func GrpcClient(addr string) (conn *grpc.ClientConn, err error) {
 			grpc.MaxCallRecvMsgSize(GrpcMaxBytes),
 			grpc.MaxCallSendMsgSize(GrpcMaxBytes),
 		),
-		grpc.WithChainUnaryInterceptor(grpcClientTraceInterceptor()),
+		grpc.WithChainUnaryInterceptor(grpcClientTraceInterceptor(nil)),
 	)
 }
 
-func grpcServerLogger(opts MonitoringOpts) grpc.UnaryServerInterceptor {
+func grpcServerLogger(
+	opts MonitoringOpts,
+	logExcludedMethods []string,
+) grpc.UnaryServerInterceptor {
 	grpcInterceptor, grpcLoggingOpts := grpcLogger(opts)
-	return logging.UnaryServerInterceptor(grpcInterceptor, grpcLoggingOpts...)
+	interceptor := logging.UnaryServerInterceptor(grpcInterceptor, grpcLoggingOpts...)
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
+		if !grpcMethodAllowed(info.FullMethod, logExcludedMethods) {
+			return handler(ctx, req)
+		}
+		return interceptor(ctx, req, info, handler)
+	}
 }
 
-func grpcClientLogger(opts MonitoringOpts) grpc.UnaryClientInterceptor {
+func grpcClientLogger(
+	opts MonitoringOpts,
+	logExcludedMethods []string,
+) grpc.UnaryClientInterceptor {
 	grpcInterceptor, grpcLoggingOpts := grpcLogger(opts)
-	return logging.UnaryClientInterceptor(grpcInterceptor, grpcLoggingOpts...)
+	interceptor := logging.UnaryClientInterceptor(grpcInterceptor, grpcLoggingOpts...)
+	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		if !grpcMethodAllowed(method, logExcludedMethods) {
+			return invoker(ctx, method, req, reply, cc, opts...)
+		}
+		return interceptor(ctx, method, req, reply, cc, invoker, opts...)
+	}
 }
 
 func grpcLogger(opts MonitoringOpts) (logging.LoggerFunc, []logging.Option) {
@@ -254,20 +305,30 @@ func grpcLogger(opts MonitoringOpts) (logging.LoggerFunc, []logging.Option) {
 	return grpcInterceptor, grpcLoggingOpts
 }
 
-func grpcServerTraceInterceptor() grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
+func grpcServerTraceInterceptor(logExcludedMethods []string) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
+		if !grpcMethodAllowed(info.FullMethod, logExcludedMethods) {
+			return handler(ctx, req)
+		}
 		resp, err = handler(ctx, req)
 		annotateSpan(ctx, err)
 		return resp, err
 	}
 }
 
-func grpcClientTraceInterceptor() grpc.UnaryClientInterceptor {
+func grpcClientTraceInterceptor(logExcludedMethods []string) grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) (err error) {
+		if !grpcMethodAllowed(method, logExcludedMethods) {
+			return invoker(ctx, method, req, reply, cc, opts...)
+		}
 		err = invoker(ctx, method, req, reply, cc, opts...)
 		annotateSpan(ctx, err)
 		return err
 	}
+}
+
+func grpcMethodAllowed(method string, excludedMethods []string) bool {
+	return !slices.Contains(excludedMethods, method)
 }
 
 func annotateSpan(ctx context.Context, err error) {

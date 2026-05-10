@@ -19,7 +19,7 @@ func CreateRunnerClient(
 		Level:           monitoringOpts.Level,
 		OTELOn:          monitoringOpts.OTELOn,
 	}
-	conn, err := server.LoggingGrpcClient(addr, opts)
+	conn, err := server.LoggingGrpcClientWithExcludedMethodLogs(addr, opts, []string{Runner_Heartbeat_FullMethodName})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create runner client for address %q: %w", addr, err)
 	}

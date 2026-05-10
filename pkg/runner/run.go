@@ -58,7 +58,9 @@ func Run(ctx context.Context, conf RunnerConfig) error {
 	}
 	// lis.Close by the grpcServer
 
-	grpcServer := server.InstrumentedGrpcServer(monitoringOpts,
+	grpcServer := server.InstrumentedGrpcServerWithExcludedMethodLogs(
+		monitoringOpts,
+		[]string{runnergrpc.Runner_Heartbeat_FullMethodName},
 		server.WithDownloadMetaHolder,
 		server.WithInstanceStartMetaHolder,
 		server.WithInvokeMetaHolder,
