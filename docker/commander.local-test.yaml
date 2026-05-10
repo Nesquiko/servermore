@@ -1,5 +1,5 @@
 AppName: commander
-Env: LOCAL
+Env: PROD
 Host: 0.0.0.0
 HttpPort: "42069"
 GrpcPort: "42070"

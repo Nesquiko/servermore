@@ -1,6 +1,6 @@
 AppName: runner-1
 CommitHash: local-test
-Env: LOCAL
+Env: PROD
 Addr: runner-1:42071
 CommanderHost: commander
 CommanderHttpPort: "42069"

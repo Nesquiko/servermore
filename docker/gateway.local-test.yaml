@@ -1,10 +1,10 @@
 AppName: gateway
-Env: LOCAL
+Env: PROD
 Address: 0.0.0.0:8080
 CommanderAddr: commander:42070
 CommanderClientMonitoringOpts:
-  Env: LOCAL
+  Env: PROD
   AppName: gateway
 RunnerClientMonitoringOpts:
-  Env: LOCAL
+  Env: PROD
   AppName: gateway

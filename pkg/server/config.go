@@ -14,6 +14,7 @@ type Environment string
 const (
 	LOCAL Environment = "LOCAL"
 	TEST  Environment = "TEST"
+	PROD  Environment = "PROD"
 )
 
 func ParseFlagsAndLoadConfig[CONFIG any]() CONFIG {
