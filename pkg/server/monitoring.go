@@ -350,7 +350,7 @@ func annotateSpan(ctx context.Context, err error) {
 
 func slogLogger(opts MonitoringOpts, slogOpts *slog.HandlerOptions) *slog.Logger {
 	logger := slog.
-		New(slog.NewTextHandler(os.Stdout, slogOpts)).
+		New(slogHandler(opts, slogOpts)).
 		With(
 			slog.String("app", opts.AppName),
 			slog.String("env", string(opts.Env)),
@@ -371,4 +371,12 @@ func slogLogger(opts MonitoringOpts, slogOpts *slog.HandlerOptions) *slog.Logger
 
 func SetDefaultLogger(opts MonitoringOpts) {
 	slog.SetDefault(slogLogger(opts, &slog.HandlerOptions{Level: opts.Level}))
+}
+
+func slogHandler(opts MonitoringOpts, slogOpts *slog.HandlerOptions) slog.Handler {
+	if opts.IsDev() {
+		return slog.NewTextHandler(os.Stdout, slogOpts)
+	}
+
+	return slog.NewJSONHandler(os.Stdout, slogOpts)
 }
