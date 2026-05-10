@@ -18,6 +18,7 @@ type phase int
 const (
 	phaseSetup phase = iota
 	phaseDashboard
+	phaseQuitting
 )
 
 var (
@@ -71,12 +72,14 @@ type model struct {
 	dozzleURL         string
 	dozzleStarting    bool
 	dozzleError       string
+	grafanaURL        string
 
 	functions        []*functionEntry
 	selectedFunction int
 	selectedField    int
 	statusLine       string
 	stackStarted     bool
+	shuttingDown     bool
 
 	deployFunctionIndex int
 	deployName          string
@@ -104,6 +107,7 @@ func newModel(rootDir string) *model {
 		selectedFunction:    0,
 		selectedField:       0,
 		statusLine:          "Preparing the local test stack...",
+		grafanaURL:          "http://127.0.0.1:3000",
 		deployFunctionIndex: -1,
 	}
 }
@@ -117,8 +121,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if key, ok := msg.(tea.KeyPressMsg); ok {
 			switch key.String() {
 			case "ctrl+c", "q":
-				m.cancel()
-				return m, tea.Quit
+				return m.beginShutdown()
 			case "esc":
 				m.deployForm = nil
 				m.deployFunctionIndex = -1
@@ -150,6 +153,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			))
 		}
 		return m, cmd
+	}
+
+	if m.phase == phaseQuitting {
+		if msg, ok := msg.(stackShutdownDoneMsg); ok {
+			if msg.err != nil {
+				m.statusLine = "Compose stack shutdown failed."
+			} else {
+				m.statusLine = "Compose stack is down."
+			}
+			return m, tea.Quit
+		}
+		return m, nil
 	}
 
 	switch msg := msg.(type) {
@@ -248,6 +263,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 		return m, nil
 	case tea.KeyPressMsg:
+		if m.phase == phaseQuitting {
+			return m, nil
+		}
 		return m.handleKey(msg)
 	}
 
@@ -257,8 +275,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
-		m.cancel()
-		return m, tea.Quit
+		return m.beginShutdown()
 	}
 
 	if m.phase == phaseSetup {
@@ -283,6 +300,15 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "right", "l":
 		m.selectedFunction = clampInt(m.selectedFunction+1, 0, len(m.functions)-1)
 		m.normalizeSelectedField()
+	case "0":
+		if deployed := m.selectedDeployment(); deployed != nil {
+			enabled := deployed.ToggleEnabled()
+			if enabled {
+				m.statusLine = "Requests enabled."
+			} else {
+				m.statusLine = "Requests disabled."
+			}
+		}
 	case "+", "=":
 		if deployed := m.selectedDeployment(); deployed != nil {
 			deployed.AdjustSetting(m.selectedField, 1)
@@ -305,6 +331,9 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m *model) View() tea.View {
 	styles := newStyles()
 
+	if m.phase == phaseQuitting {
+		return tea.NewView(m.renderQuittingView(styles))
+	}
 	if m.deployForm != nil {
 		return tea.NewView(m.renderDeployView(styles))
 	}
@@ -333,6 +362,17 @@ func (m *model) Shutdown() {
 		_, _, _ = runCommand(cleanupCtx, m.rootDir, "docker", "rm", "-f", m.dozzleContainerID)
 	}
 	_ = stopStack(cleanupCtx, m.rootDir)
+}
+
+func (m *model) beginShutdown() (tea.Model, tea.Cmd) {
+	if m.shuttingDown {
+		return m, nil
+	}
+	m.shuttingDown = true
+	m.phase = phaseQuitting
+	m.statusLine = "Compose stack is going down..."
+	m.cancel()
+	return m, shutdownStackCmd(m.rootDir)
 }
 
 func (m *model) requesters() []Requester {
@@ -413,6 +453,18 @@ func (m *model) renderSetupView(styles viewStyles) string {
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
+func (m *model) renderQuittingView(styles viewStyles) string {
+	body := []string{
+		styles.Title.Render("Servermore Tester"),
+		"",
+		styles.SectionTitle.Render("Compose stack is going down..."),
+		styles.Muted.Render("Please wait while Docker Compose stops the stack."),
+	}
+
+	content := styles.Panel.Width(maxInt(60, minInt(100, m.width-8))).Render(strings.Join(body, "\n"))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
+}
+
 func (m *model) renderDeployView(styles viewStyles) string {
 	function := m.functions[m.deployFunctionIndex]
 	sections := []string{
@@ -450,7 +502,7 @@ func (m *model) renderDashboardView(styles viewStyles) string {
 		),
 		"",
 		styles.Help.Render(
-			"left/right or h/l switch functions | up/down or k/j choose setting | enter deploy | +/- adjust | d dozzle | q quits",
+			"left/right or h/l switch functions | up/down or k/j choose setting | 0 toggle requests | enter deploy | +/- adjust | d dozzle | q quits",
 		),
 	}
 	return styles.App.Width(maxInt(80, m.width)).Render(strings.Join(parts, "\n"))
@@ -475,6 +527,7 @@ func (m *model) renderDozzleStatus(styles viewStyles) string {
 	if m.dozzleError != "" {
 		line += "\n" + styles.Error.Render(m.dozzleError)
 	}
+	line += "\n" + styles.FieldLabel.Render("Grafana: ") + styles.FieldValue.Render(m.grafanaURL)
 	return line
 }
 
@@ -535,6 +588,9 @@ func (m *model) renderFunctionPanel(
 			sections = append(sections,
 				styles.FieldLabel.Render("Last status: ")+styles.FieldValue.Render(fmt.Sprintf("%d", snapshot.Stats.LastStatusCode)),
 			)
+		}
+		if !snapshot.Enabled {
+			sections = append(sections, "", styles.Error.Render("Requests are disabled."))
 		}
 		if snapshot.Stats.LastDuration > 0 {
 			sections = append(sections,

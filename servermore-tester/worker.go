@@ -36,6 +36,7 @@ type RunStats struct {
 type DeploymentSnapshot struct {
 	Name       string
 	FunctionID string
+	Enabled    bool
 	Settings   RequestSettings
 	Stats      RunStats
 }
@@ -48,6 +49,7 @@ type deploymentState struct {
 	settings   RequestSettings
 	stats      RunStats
 	cancel     context.CancelFunc
+	enabled    bool
 }
 
 func newDeploymentState(
@@ -63,7 +65,8 @@ func newDeploymentState(
 			RequestsPerSecond:   2,
 			DelayBetweenBatches: 2,
 		},
-		cancel: cancel,
+		enabled: true,
+		cancel:  cancel,
 	}
 }
 
@@ -73,6 +76,7 @@ func (d *deploymentState) Snapshot() DeploymentSnapshot {
 	return DeploymentSnapshot{
 		Name:       d.name,
 		FunctionID: d.functionID,
+		Enabled:    d.enabled,
 		Settings:   d.settings,
 		Stats:      d.stats,
 	}
@@ -96,6 +100,13 @@ func (d *deploymentState) AdjustSetting(fieldIndex int, delta int) {
 	case 2:
 		d.settings.DelayBetweenBatches = maxInt(0, d.settings.DelayBetweenBatches+delta)
 	}
+}
+
+func (d *deploymentState) ToggleEnabled() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.enabled = !d.enabled
+	return d.enabled
 }
 
 func (d *deploymentState) RecordRequest(
@@ -156,6 +167,13 @@ func runWorkerLoop(ctx context.Context, requester Requester, deployment *deploym
 	client := &http.Client{Timeout: 15 * time.Second}
 
 	for {
+		if !deployment.EnabledSnapshot() {
+			if !sleepWithContext(ctx, 250*time.Millisecond) {
+				return
+			}
+			continue
+		}
+
 		settings := deployment.SettingsSnapshot()
 		if settings.BatchSize <= 0 || settings.RequestsPerSecond <= 0 {
 			if !sleepWithContext(ctx, 250*time.Millisecond) {
@@ -204,6 +222,12 @@ func runWorkerLoop(ctx context.Context, requester Requester, deployment *deploym
 			return
 		}
 	}
+}
+
+func (d *deploymentState) EnabledSnapshot() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.enabled
 }
 
 func invokeFunction(

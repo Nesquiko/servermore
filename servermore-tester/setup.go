@@ -49,6 +49,10 @@ type dozzleStartMsg struct {
 	err         error
 }
 
+type stackShutdownDoneMsg struct {
+	err error
+}
+
 func findProjectRoot() (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {
@@ -142,6 +146,14 @@ func startDozzleCmd(ctx context.Context, rootDir string) tea.Cmd {
 	}
 }
 
+func shutdownStackCmd(rootDir string) tea.Cmd {
+	return func() tea.Msg {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return stackShutdownDoneMsg{err: stopStack(cleanupCtx, rootDir)}
+	}
+}
+
 func startStack(ctx context.Context, rootDir string) (string, bool, error) {
 	composeFile := filepath.Join(rootDir, composeRelPath)
 	var logs []string
@@ -216,7 +228,7 @@ func stopStack(ctx context.Context, rootDir string) error {
 		"compose",
 		"-f",
 		composeFile,
-		"stop",
+		"down",
 	)
 	return err
 }
