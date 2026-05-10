@@ -118,6 +118,32 @@ func (m *model) Init() tea.Cmd {
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg.(type) {
+	case uiTickMsg:
+		if m.phase == phaseSetup {
+			m.spinnerIndex = (m.spinnerIndex + 1) % len(spinnerFrames)
+			return m, uiTickCmd()
+		}
+		return m, nil
+	case dashboardTickMsg:
+		if m.phase == phaseDashboard {
+			return m, dashboardTickCmd()
+		}
+		return m, nil
+	}
+
+	if m.phase == phaseQuitting {
+		if msg, ok := msg.(stackShutdownDoneMsg); ok {
+			if msg.err != nil {
+				m.statusLine = "Compose stack shutdown failed."
+			} else {
+				m.statusLine = "Compose stack is down."
+			}
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+
 	if m.deployForm != nil {
 		if key, ok := msg.(tea.KeyPressMsg); ok {
 			switch key.String() {
@@ -156,26 +182,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	if m.phase == phaseQuitting {
-		if msg, ok := msg.(stackShutdownDoneMsg); ok {
-			if msg.err != nil {
-				m.statusLine = "Compose stack shutdown failed."
-			} else {
-				m.statusLine = "Compose stack is down."
-			}
-			return m, tea.Quit
-		}
-		return m, nil
-	}
-
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = maxInt(80, msg.Width)
 		m.height = maxInt(24, msg.Height)
 		return m, nil
-	case uiTickMsg:
-		m.spinnerIndex = (m.spinnerIndex + 1) % len(spinnerFrames)
-		return m, uiTickCmd()
 	case compileDoneMsg:
 		m.setupOutput = msg.output
 		if msg.err != nil {
@@ -230,8 +241,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 	case stackPollTickMsg:
 		return m, pollStackCmd(m.ctx, m.rootDir)
-	case dashboardTickMsg:
-		return m, dashboardTickCmd()
 	case dozzleStartMsg:
 		m.dozzleStarting = false
 		if msg.err != nil {
@@ -266,9 +275,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 		return m, nil
 	case tea.KeyPressMsg:
-		if m.phase == phaseQuitting {
-			return m, nil
-		}
 		return m.handleKey(msg)
 	}
 
