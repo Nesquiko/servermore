@@ -42,6 +42,7 @@ var (
 
 type uiTickMsg time.Time
 type stackPollTickMsg time.Time
+type dashboardTickMsg time.Time
 
 type functionEntry struct {
 	requester   Requester
@@ -211,7 +212,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.commanderReady && msg.gatewayReady {
 			m.phase = phaseDashboard
 			m.statusLine = "Stack is ready. Press Enter to deploy the selected function."
-			return m, nil
+			return m, dashboardTickCmd()
 		}
 		m.setupPolls++
 		m.statusLine = fmt.Sprintf(
@@ -229,6 +230,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 	case stackPollTickMsg:
 		return m, pollStackCmd(m.ctx, m.rootDir)
+	case dashboardTickMsg:
+		m.spinnerIndex = (m.spinnerIndex + 1) % len(spinnerFrames)
+		return m, dashboardTickCmd()
 	case dozzleStartMsg:
 		m.dozzleStarting = false
 		if msg.err != nil {
@@ -494,6 +498,7 @@ func (m *model) renderDashboardView(styles viewStyles) string {
 		m.renderFunctionSelector(styles),
 		"",
 		styles.Status.Render(m.statusLine),
+		styles.Muted.Render("refresh " + spinnerFrames[m.spinnerIndex]),
 		"",
 		m.renderFunctionPanel(
 			styles,
@@ -686,6 +691,13 @@ func uiTickCmd() tea.Cmd {
 	return func() tea.Msg {
 		time.Sleep(120 * time.Millisecond)
 		return uiTickMsg(time.Now())
+	}
+}
+
+func dashboardTickCmd() tea.Cmd {
+	return func() tea.Msg {
+		time.Sleep(300 * time.Millisecond)
+		return dashboardTickMsg(time.Now())
 	}
 }
 

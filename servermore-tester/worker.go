@@ -109,6 +109,13 @@ func (d *deploymentState) ToggleEnabled() bool {
 	return d.enabled
 }
 
+func (d *deploymentState) RecordRequestStarted() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.stats.RequestsSent++
+	d.stats.LastUpdatedAt = time.Now()
+}
+
 func (d *deploymentState) RecordRequest(
 	spec InvocationSpec,
 	statusCode int,
@@ -119,7 +126,6 @@ func (d *deploymentState) RecordRequest(
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	d.stats.RequestsSent++
 	d.stats.LastMethod = ensureMethod(spec.Method)
 	d.stats.LastPath = spec.Path
 	d.stats.LastDuration = took
@@ -191,14 +197,17 @@ func runWorkerLoop(ctx context.Context, requester Requester, deployment *deploym
 			}
 
 			spec := requester.NextInvocation()
+			deployment.RecordRequestStarted()
 			startedAt := time.Now()
-			statusCode, responsePreview, err := invokeFunction(
-				ctx,
-				client,
-				deployment.functionID,
-				spec,
-			)
-			deployment.RecordRequest(spec, statusCode, responsePreview, err, time.Since(startedAt))
+			go func(spec InvocationSpec, startedAt time.Time) {
+				statusCode, responsePreview, err := invokeFunction(
+					ctx,
+					client,
+					deployment.functionID,
+					spec,
+				)
+				deployment.RecordRequest(spec, statusCode, responsePreview, err, time.Since(startedAt))
+			}(spec, startedAt)
 			sentInBatch++
 
 			nextSettings := deployment.SettingsSnapshot()
