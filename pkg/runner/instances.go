@@ -59,17 +59,18 @@ func (is *instanceState) ResetTimer() {
 	assert.That(resetted, "calling ResetTimer on already triggered timer")
 }
 
-func (is *instanceState) AddToQueue(req InvocationRequest) <-chan *InvocationResult {
+func (is *instanceState) AddToQueue(ctx context.Context, req InvocationRequest) <-chan *InvocationResult {
 	assert.That(is.opened.Load(), "adding request to already closed queue")
 
 	resCh := make(chan *InvocationResult)
 	is.ResetTimer()
-	is.queue <- invocation{req: req, resCh: resCh, enqueuedAt: time.Now()}
+	is.queue <- invocation{ctx: ctx, req: req, resCh: resCh, enqueuedAt: time.Now()}
 
 	return resCh
 }
 
 type invocation struct {
+	ctx        context.Context
 	req        InvocationRequest
 	resCh      chan *InvocationResult
 	enqueuedAt time.Time

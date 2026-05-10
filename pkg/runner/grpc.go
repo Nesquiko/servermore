@@ -281,7 +281,7 @@ func (r *runnerGrpcServer) InvokeFunctionInstance(
 	meta.WorkerAlreadyRunning = isRunning
 	meta.StartedWorker = !isRunning
 	meta.FunctionPath = instance.funcPath
-	respCh := instance.AddToQueue(invocationReq)
+	respCh := instance.AddToQueue(ctx, invocationReq)
 	meta.QueueDepthAtEnqueue = len(instance.queue)
 
 	if !isRunning {
@@ -330,7 +330,11 @@ outer:
 
 			queueWaitTook := time.Since(req.enqueuedAt)
 			guestStart := time.Now()
-			resp, err := instance.runtime.Invoke(instance.workerCtx, &guest.InvocationRequest{Method: req.req.Method, Path: req.req.Path, Headers: req.req.Headers, Body: req.req.Body})
+			invokeCtx, invokeCancel := context.WithCancel(req.ctx)
+			stopCancel := context.AfterFunc(instance.workerCtx, invokeCancel)
+			resp, err := instance.runtime.Invoke(invokeCtx, &guest.InvocationRequest{Method: req.req.Method, Path: req.req.Path, Headers: req.req.Headers, Body: req.req.Body})
+			stopCancel()
+			invokeCancel()
 			guestInvokeTook := time.Since(guestStart)
 			if err != nil {
 				req.resCh <- &InvocationResult{err: err, queueWaitTook: queueWaitTook, guestInvokeTook: guestInvokeTook}
