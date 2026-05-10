@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ const (
 	heartbeatPath  = "/monitoring/heartbeat"
 	composeRelPath = "docker/docker-compose.local-test.yaml"
 	tmpFunctions   = "servermore-tester-functions"
+	dozzlePort     = "8080"
 )
 
 type compileDoneMsg struct {
@@ -31,6 +33,19 @@ type stackReadyMsg struct {
 	output  string
 	started bool
 	err     error
+}
+
+type stackPollMsg struct {
+	output         string
+	commanderReady bool
+	gatewayReady   bool
+	err            error
+}
+
+type dozzleStartMsg struct {
+	containerID string
+	url         string
+	err         error
 }
 
 func findProjectRoot() (string, error) {
@@ -107,6 +122,25 @@ func startStackCmd(ctx context.Context, rootDir string) tea.Cmd {
 	}
 }
 
+func pollStackCmd(ctx context.Context, rootDir string) tea.Cmd {
+	return func() tea.Msg {
+		output, commanderReady, gatewayReady, err := pollStack(ctx, rootDir)
+		return stackPollMsg{
+			output:         output,
+			commanderReady: commanderReady,
+			gatewayReady:   gatewayReady,
+			err:            err,
+		}
+	}
+}
+
+func startDozzleCmd(ctx context.Context, rootDir string) tea.Cmd {
+	return func() tea.Msg {
+		containerID, url, err := startDozzle(ctx, rootDir)
+		return dozzleStartMsg{containerID: containerID, url: url, err: err}
+	}
+}
+
 func startStack(ctx context.Context, rootDir string) (string, bool, error) {
 	composeFile := filepath.Join(rootDir, composeRelPath)
 	var logs []string
@@ -146,15 +180,30 @@ func startStack(ctx context.Context, rootDir string) (string, bool, error) {
 		return strings.Join(logs, "\n\n"), false, err
 	}
 
-	waitErr := waitForHTTPReady(ctx, commanderURL+heartbeatPath, 2*time.Minute)
-	if waitErr == nil {
-		waitErr = waitForHTTPReady(ctx, gatewayURL+heartbeatPath, 2*time.Minute)
-	}
-	if waitErr != nil {
-		return strings.Join(logs, "\n\n"), true, waitErr
+	return strings.Join(logs, "\n\n"), true, nil
+}
+
+func pollStack(ctx context.Context, rootDir string) (string, bool, bool, error) {
+	composeFile := filepath.Join(rootDir, composeRelPath)
+	_, output, err := runCommand(
+		ctx,
+		rootDir,
+		"docker",
+		"compose",
+		"-f",
+		composeFile,
+		"logs",
+		"--no-color",
+		"--tail",
+		"10",
+	)
+	if err != nil {
+		return output, false, false, err
 	}
 
-	return strings.Join(logs, "\n\n"), true, nil
+	commanderReady := checkHTTPReady(ctx, commanderURL+heartbeatPath)
+	gatewayReady := checkHTTPReady(ctx, gatewayURL+heartbeatPath)
+	return output, commanderReady, gatewayReady, nil
 }
 
 func stopStack(ctx context.Context, rootDir string) error {
@@ -170,6 +219,62 @@ func stopStack(ctx context.Context, rootDir string) error {
 	)
 	return err
 }
+
+func startDozzle(ctx context.Context, rootDir string) (string, string, error) {
+	name := fmt.Sprintf("servermore-dozzle-%d", time.Now().UnixNano())
+	_, output, err := runCommand(
+		ctx,
+		rootDir,
+		"docker",
+		"run",
+		"-d",
+		"--name",
+		name,
+		"-v",
+		"/var/run/docker.sock:/var/run/docker.sock",
+		"-v",
+		"dozzle_data:/data",
+		"-p",
+		"0:8080",
+		"amir20/dozzle:latest",
+	)
+	if err != nil {
+		return "", "", err
+	}
+
+	containerID := strings.TrimSpace(output)
+	if containerID == "" {
+		return "", "", fmt.Errorf("docker run did not return a container id")
+	}
+
+	portOutput, _, err := runCommand(ctx, rootDir, "docker", "port", containerID, dozzlePort)
+	if err != nil {
+		return containerID, "", err
+	}
+
+	hostPort, err := parsePublishedPort(portOutput)
+	if err != nil {
+		return containerID, "", err
+	}
+
+	return containerID, fmt.Sprintf("http://127.0.0.1:%s", hostPort), nil
+}
+
+func parsePublishedPort(output string) (string, error) {
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		matches := portSuffixPattern.FindStringSubmatch(line)
+		if len(matches) == 2 {
+			return matches[1], nil
+		}
+	}
+	return "", fmt.Errorf("could not parse published port from %q", output)
+}
+
+var portSuffixPattern = regexp.MustCompile(`:(\d+)$`)
 
 func runCommand(
 	ctx context.Context,
@@ -191,32 +296,21 @@ func runCommand(
 	return strings.Join(append([]string{name}, args...), " "), trimmed, nil
 }
 
-func waitForHTTPReady(ctx context.Context, target string, timeout time.Duration) error {
-	deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
+func checkHTTPReady(ctx context.Context, target string) bool {
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
 	client := &http.Client{Timeout: 2 * time.Second}
-	for {
-		req, err := http.NewRequestWithContext(deadlineCtx, http.MethodGet, target, nil)
-		if err != nil {
-			return fmt.Errorf("build readiness request for %s: %w", target, err)
-		}
-
-		resp, err := client.Do(req)
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusBadRequest {
-				return nil
-			}
-		}
-
-		select {
-		case <-deadlineCtx.Done():
-			if err != nil {
-				return fmt.Errorf("wait for %s: %w", target, err)
-			}
-			return fmt.Errorf("wait for %s: last status %s", target, resp.Status)
-		case <-time.After(500 * time.Millisecond):
-		}
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, target, nil)
+	if err != nil {
+		return false
 	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusBadRequest
 }

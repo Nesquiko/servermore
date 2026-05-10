@@ -40,6 +40,7 @@ var (
 )
 
 type uiTickMsg time.Time
+type stackPollTickMsg time.Time
 
 type functionEntry struct {
 	requester   Requester
@@ -64,6 +65,12 @@ type model struct {
 	setupStatus  string
 	setupOutput  string
 	setupErr     error
+	setupPolls   int
+
+	dozzleContainerID string
+	dozzleURL         string
+	dozzleStarting    bool
+	dozzleError       string
 
 	functions        []*functionEntry
 	selectedFunction int
@@ -174,8 +181,50 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusLine = "Stack startup failed."
 			return m, nil
 		}
-		m.phase = phaseDashboard
-		m.statusLine = "Stack is ready. Press Enter to deploy the selected function."
+		m.statusLine = "Stack started. Waiting for commander and gateway..."
+		m.setupPolls = 0
+		return m, pollStackCmd(m.ctx, m.rootDir)
+	case stackPollMsg:
+		if strings.TrimSpace(msg.output) != "" {
+			m.setupOutput = msg.output
+		}
+		if msg.err != nil {
+			m.setupErr = msg.err
+			m.statusLine = "Stack log polling failed."
+			return m, nil
+		}
+		if msg.commanderReady && msg.gatewayReady {
+			m.phase = phaseDashboard
+			m.statusLine = "Stack is ready. Press Enter to deploy the selected function."
+			return m, nil
+		}
+		m.setupPolls++
+		m.statusLine = fmt.Sprintf(
+			"Waiting for services... commander=%t gateway=%t",
+			msg.commanderReady,
+			msg.gatewayReady,
+		)
+		if m.setupPolls >= 240 {
+			m.setupErr = fmt.Errorf("stack readiness timed out after 2 minutes")
+			m.statusLine = "Stack startup timed out."
+			return m, nil
+		}
+		return m, tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+			return stackPollTickMsg(t)
+		})
+	case stackPollTickMsg:
+		return m, pollStackCmd(m.ctx, m.rootDir)
+	case dozzleStartMsg:
+		m.dozzleStarting = false
+		if msg.err != nil {
+			m.dozzleError = msg.err.Error()
+			m.statusLine = "Failed to start Dozzle."
+			return m, nil
+		}
+		m.dozzleContainerID = msg.containerID
+		m.dozzleURL = msg.url
+		m.dozzleError = ""
+		m.statusLine = "Dozzle is running."
 		return m, nil
 	case deployDoneMsg:
 		function := m.functions[msg.functionIndex]
@@ -223,6 +272,13 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "down", "j":
 		m.selectedFunction = clampInt(m.selectedFunction+1, 0, len(m.functions)-1)
 		m.normalizeSelectedField()
+	case "d":
+		if m.dozzleContainerID == "" && !m.dozzleStarting {
+			m.dozzleStarting = true
+			m.dozzleError = ""
+			m.statusLine = "Starting Dozzle..."
+			return m, startDozzleCmd(m.ctx, m.rootDir)
+		}
 	case "left", "h", "shift+tab":
 		m.selectedField = clampInt(m.selectedField-1, 0, m.selectedFunctionFieldCount()-1)
 	case "right", "l", "tab":
@@ -273,6 +329,9 @@ func (m *model) Shutdown() {
 
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if m.dozzleContainerID != "" {
+		_, _, _ = runCommand(cleanupCtx, m.rootDir, "docker", "rm", "-f", m.dozzleContainerID)
+	}
 	_ = stopStack(cleanupCtx, m.rootDir)
 }
 
@@ -331,6 +390,8 @@ func (m *model) renderSetupView(styles viewStyles) string {
 	body := []string{
 		styles.Title.Render("Servermore Tester"),
 		"",
+		m.renderDozzleStatus(styles),
+		"",
 		styles.SectionTitle.Render(spinner + " " + m.setupStatus),
 		styles.Muted.Render(m.statusLine),
 	}
@@ -359,6 +420,8 @@ func (m *model) renderDeployView(styles viewStyles) string {
 	sections := []string{
 		styles.Title.Render("Deploy Function"),
 		"",
+		m.renderDozzleStatus(styles),
+		"",
 		styles.Muted.Render("Binary: " + function.requester.BinaryName()),
 		styles.Muted.Render(function.requester.Description()),
 		"",
@@ -378,6 +441,8 @@ func (m *model) renderDashboardView(styles viewStyles) string {
 			"Compile test binaries, deploy them into the local stack, and keep live traffic running.",
 		),
 		"",
+		m.renderDozzleStatus(styles),
+		"",
 		m.renderFunctionSelector(styles),
 		"",
 		styles.Status.Render(m.statusLine),
@@ -389,10 +454,32 @@ func (m *model) renderDashboardView(styles viewStyles) string {
 		),
 		"",
 		styles.Help.Render(
-			"up/down switch functions | left/right choose setting | enter deploy | +/- adjust | q quits",
+			"up/down switch functions | left/right choose setting | enter deploy | +/- adjust | d dozzle | q quits",
 		),
 	}
 	return styles.App.Width(maxInt(80, m.width)).Render(strings.Join(parts, "\n"))
+}
+
+func (m *model) renderDozzleStatus(styles viewStyles) string {
+	button := "[ d Start Dozzle ]"
+	if m.dozzleContainerID != "" {
+		button = "[ Dozzle running ]"
+	}
+	if m.dozzleStarting {
+		button = "[ Starting Dozzle... ]"
+	}
+
+	url := "not started"
+	if m.dozzleURL != "" {
+		url = m.dozzleURL
+	}
+
+	line := styles.FieldLabel.Render("Dozzle: ") + styles.SelectedField.Render(button) +
+		styles.FieldLabel.Render(" | URL: ") + styles.FieldValue.Render(url)
+	if m.dozzleError != "" {
+		line += "\n" + styles.Error.Render(m.dozzleError)
+	}
+	return line
 }
 
 func (m *model) renderFunctionSelector(styles viewStyles) string {
