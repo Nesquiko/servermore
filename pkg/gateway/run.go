@@ -20,14 +20,14 @@ import (
 )
 
 type GatewayConfig struct {
-	AppName string
-	Env     server.Environment
+	AppName string             `yaml:"app_name"`
+	Env     server.Environment `yaml:"env"`
 
-	Address string
+	Address string `yaml:"address"`
 
-	CommanderAddr                 string
-	CommanderClientMonitoringOpts server.MonitoringOpts
-	RunnerClientMonitoringOpts    server.MonitoringOpts
+	CommanderAddr                 string                `yaml:"commander_addr"`
+	CommanderClientMonitoringOpts server.MonitoringOpts `yaml:"commander_client_monitoring_opts"`
+	RunnerClientMonitoringOpts    server.MonitoringOpts `yaml:"runner_client_monitoring_opts"`
 }
 
 func Run(ctx context.Context, conf GatewayConfig) error {

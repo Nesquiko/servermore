@@ -73,7 +73,7 @@ func (svc *CommanderService) PollRunnerHeartbeats(
 	}
 
 	err = eg.Wait()
-	slog.InfoContext(ctx, "runner heartbeat polling completed",
+	slog.DebugContext(ctx, "runner heartbeat polling completed",
 		slog.Int("runners_checked", len(runners)),
 		slog.Time("executed_at", executedAt),
 		slog.Duration("took", time.Since(startedAt)),

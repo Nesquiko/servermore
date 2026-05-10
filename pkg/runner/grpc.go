@@ -82,18 +82,8 @@ func newRunnerGrpcServer(
 		server.Close(conn)
 	}
 
-	client := commandergrpc.NewCommanderClient(conn)
-
-	resp, err := client.RegisterRunner(ctx, &commandergrpc.RegisterRunnerRequest{Addr: conf.Addr})
-	if err != nil {
-		closer()
-		return nil, nil, fmt.Errorf("registration with commander failed: %w", err)
-	}
-	slog.Info("registration with commander successful", "runner.id", resp.RunnerId)
-
 	return &runnerGrpcServer{
-		runnerId:              resp.RunnerId,
-		commanderGrpcClient:   client,
+		commanderGrpcClient:   commandergrpc.NewCommanderClient(conn),
 		commanderHttpClient:   httpClient,
 		instances:             NewInstanceStates(),
 		downloads:             NewDownloadsSyncMap(),
@@ -103,6 +93,17 @@ func newRunnerGrpcServer(
 		downloadsStorageRoot:  conf.FuncStorageRoot,
 		metricsCollector:      NewMetricsCollector(),
 	}, closer, nil
+}
+
+func (r *runnerGrpcServer) registerWithCommander(ctx context.Context, addr string) error {
+	resp, err := r.commanderGrpcClient.RegisterRunner(ctx, &commandergrpc.RegisterRunnerRequest{Addr: addr})
+	if err != nil {
+		return fmt.Errorf("registration with commander failed: %w", err)
+	}
+
+	r.runnerId = resp.RunnerId
+	slog.Info("registration with commander successful", "runner.id", resp.RunnerId)
+	return nil
 }
 
 // Heartbeat implements [RunnerServer].

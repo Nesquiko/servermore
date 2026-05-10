@@ -16,19 +16,19 @@ import (
 )
 
 type RunnerConfig struct {
-	AppName    string
-	CommitHash string
-	Env        server.Environment
+	AppName    string             `yaml:"app_name"`
+	CommitHash string             `yaml:"commit_hash"`
+	Env        server.Environment `yaml:"env"`
 
-	Addr string
+	Addr string `yaml:"addr"`
 
-	CommanderHost     string
-	CommanderHttpPort string
-	CommanderGrpcPort string
+	CommanderHost     string `yaml:"commander_host"`
+	CommanderHttpPort string `yaml:"commander_http_port"`
+	CommanderGrpcPort string `yaml:"commander_grpc_port"`
 
-	InstanceShutdownAfter time.Duration
-	InstanceGracePeriod   time.Duration
-	FuncStorageRoot       string
+	InstanceShutdownAfter time.Duration `yaml:"instance_shutdown_after"`
+	InstanceGracePeriod   time.Duration `yaml:"instance_grace_period"`
+	FuncStorageRoot       string        `yaml:"func_storage_root"`
 }
 
 func Run(ctx context.Context, conf RunnerConfig) error {
@@ -72,6 +72,15 @@ func Run(ctx context.Context, conf RunnerConfig) error {
 		}
 		close(errCh)
 	}()
+
+	registerCtx, registerCancel := context.WithTimeout(ctx, 5*time.Second)
+	if err := runnerServer.registerWithCommander(registerCtx, conf.Addr); err != nil {
+		registerCancel()
+		grpcServer.GracefulStop()
+		runnerCloser()
+		return fmt.Errorf("failed to register runner: %w", err)
+	}
+	registerCancel()
 
 	select {
 	case <-ctx.Done():

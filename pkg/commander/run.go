@@ -25,20 +25,20 @@ import (
 )
 
 type CommanderConfig struct {
-	AppName string
-	Env     server.Environment
+	AppName string             `yaml:"app_name"`
+	Env     server.Environment `yaml:"env"`
 
-	Host     string
-	HttpPort string
-	GrpcPort string
+	Host     string `yaml:"host"`
+	HttpPort string `yaml:"http_port"`
+	GrpcPort string `yaml:"grpc_port"`
 
-	DbURI           string
-	FuncStorageRoot AbsolutePath
+	DbURI           string       `yaml:"db_uri"`
+	FuncStorageRoot AbsolutePath `yaml:"func_storage_root"`
 
-	RunnerHeartbeatPoll time.Duration
+	RunnerHeartbeatPoll time.Duration `yaml:"runner_heartbeat_poll"`
 
-	RunnerOverloadedQueueSize   int
-	InstanceOverloadedQueueSize int
+	RunnerOverloadedQueueSize   int `yaml:"runner_overloaded_queue_size"`
+	InstanceOverloadedQueueSize int `yaml:"instance_overloaded_queue_size"`
 }
 
 func (c CommanderConfig) GrpcAddr() string {

@@ -29,6 +29,9 @@ func (mc *MetricsCollector) Collect() (SystemMetrics, error) {
 	now := time.Now()
 	interval := now.Sub(mc.lastCallTime)
 	mc.lastCallTime = now
+	if interval > 100*time.Millisecond {
+		interval = 100 * time.Millisecond
+	}
 
 	// Get system-wide CPU usage
 	cpuPercents, err := cpu.Percent(interval, false)

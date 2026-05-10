@@ -27,14 +27,14 @@ import (
 )
 
 type MonitoringOpts struct {
-	Env Environment
+	Env Environment `yaml:"env"`
 
-	AppName         string
-	AppVersion      string
-	AdditionalAttrs map[string]string
+	AppName         string            `yaml:"app_name"`
+	AppVersion      string            `yaml:"app_version"`
+	AdditionalAttrs map[string]string `yaml:"additional_attrs"`
 
-	Level  slog.Level
-	OTELOn bool
+	Level  slog.Level `yaml:"level"`
+	OTELOn bool       `yaml:"otel_on"`
 }
 
 func (o MonitoringOpts) IsDev() bool {
