@@ -6,6 +6,6 @@ addr: runner-2:42071
 commander_host: commander
 commander_http_port: "42069"
 commander_grpc_port: "42070"
-instance_shutdown_after: 10m
+instance_shutdown_after: 10s
 instance_grace_period: 1s
 func_storage_root: /data/functions
