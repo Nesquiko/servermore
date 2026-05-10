@@ -53,6 +53,7 @@ func Run(ctx context.Context, cache caching.RoutingCache, conf CommanderConfig) 
 		Env:     conf.Env,
 		AppName: conf.AppName,
 	}
+	server.SetDefaultLogger(monitoringOpts)
 
 	otelCfg, otelShutdown, err := server.InitHttpOTEL(ctx, monitoringOpts)
 	if err != nil {

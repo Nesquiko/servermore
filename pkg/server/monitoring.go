@@ -365,7 +365,10 @@ func slogLogger(opts MonitoringOpts, slogOpts *slog.HandlerOptions) *slog.Logger
 			logger = logger.With(slog.String(k, v))
 		}
 	}
-	slog.SetDefault(logger)
 
 	return logger
+}
+
+func SetDefaultLogger(opts MonitoringOpts) {
+	slog.SetDefault(slogLogger(opts, &slog.HandlerOptions{Level: opts.Level}))
 }

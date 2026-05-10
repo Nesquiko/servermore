@@ -38,6 +38,7 @@ func Run(ctx context.Context, conf GatewayConfig) error {
 		Env:     conf.Env,
 		AppName: conf.AppName,
 	}
+	server.SetDefaultLogger(monitoringOpts)
 
 	otelCfg, otelShutdown, err := server.InitHttpOTEL(ctx, monitoringOpts)
 	if err != nil {

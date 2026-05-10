@@ -40,6 +40,7 @@ func Run(ctx context.Context, conf RunnerConfig) error {
 		AppName:    conf.AppName,
 		AppVersion: conf.CommitHash,
 	}
+	server.SetDefaultLogger(monitoringOpts)
 
 	_, otelShutdown, err := server.InitOTEL(ctx, monitoringOpts)
 	if err != nil {
