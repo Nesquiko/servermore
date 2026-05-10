@@ -1,4 +1,4 @@
-package main
+package servermoretester
 
 import (
 	"fmt"

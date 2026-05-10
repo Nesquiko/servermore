@@ -1,4 +1,4 @@
-package main
+package servermoretester
 
 import (
 	"bytes"
@@ -17,20 +17,25 @@ import (
 )
 
 type deployDoneMsg struct {
-	cardIndex  int
-	name       string
-	functionID string
-	err        error
+	functionIndex int
+	name          string
+	functionID    string
+	err           error
 }
 
-func deployFunctionCmd(ctx context.Context, cardIndex int, binaryPath string, name string) tea.Cmd {
+func deployFunctionCmd(
+	ctx context.Context,
+	functionIndex int,
+	binaryPath string,
+	name string,
+) tea.Cmd {
 	return func() tea.Msg {
 		functionID, err := deployFunction(ctx, binaryPath, name)
 		return deployDoneMsg{
-			cardIndex:  cardIndex,
-			name:       name,
-			functionID: functionID,
-			err:        err,
+			functionIndex: functionIndex,
+			name:          name,
+			functionID:    functionID,
+			err:           err,
 		}
 	}
 }

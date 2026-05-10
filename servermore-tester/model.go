@@ -1,4 +1,4 @@
-package main
+package servermoretester
 
 import (
 	"context"
@@ -41,7 +41,7 @@ var (
 
 type uiTickMsg time.Time
 
-type functionCard struct {
+type functionEntry struct {
 	requester   Requester
 	binaryPath  string
 	deploying   bool
@@ -65,39 +65,39 @@ type model struct {
 	setupOutput  string
 	setupErr     error
 
-	cards         []*functionCard
-	selectedCard  int
-	selectedField int
-	statusLine    string
-	stackStarted  bool
+	functions        []*functionEntry
+	selectedFunction int
+	selectedField    int
+	statusLine       string
+	stackStarted     bool
 
-	deployCardIndex int
-	deployName      string
-	deployForm      *huh.Form
+	deployFunctionIndex int
+	deployName          string
+	deployForm          *huh.Form
 }
 
 func newModel(rootDir string) *model {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	requesters := catalog()
-	cards := make([]*functionCard, 0, len(requesters))
+	functions := make([]*functionEntry, 0, len(requesters))
 	for _, requester := range requesters {
-		cards = append(cards, &functionCard{requester: requester})
+		functions = append(functions, &functionEntry{requester: requester})
 	}
 
 	return &model{
-		rootDir:         rootDir,
-		phase:           phaseSetup,
-		ctx:             ctx,
-		cancel:          cancel,
-		width:           120,
-		height:          40,
-		setupStatus:     "Compiling testing functions...",
-		cards:           cards,
-		selectedCard:    0,
-		selectedField:   0,
-		statusLine:      "Preparing the local test stack...",
-		deployCardIndex: -1,
+		rootDir:             rootDir,
+		phase:               phaseSetup,
+		ctx:                 ctx,
+		cancel:              cancel,
+		width:               120,
+		height:              40,
+		setupStatus:         "Compiling testing functions...",
+		functions:           functions,
+		selectedFunction:    0,
+		selectedField:       0,
+		statusLine:          "Preparing the local test stack...",
+		deployFunctionIndex: -1,
 	}
 }
 
@@ -114,7 +114,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			case "esc":
 				m.deployForm = nil
-				m.deployCardIndex = -1
+				m.deployFunctionIndex = -1
 				m.statusLine = "Deployment cancelled."
 				return m, nil
 			}
@@ -126,16 +126,19 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.deployForm != nil && m.deployForm.State == huh.StateCompleted {
 			name := strings.TrimSpace(m.deployForm.GetString("name"))
-			cardIndex := m.deployCardIndex
+			functionIndex := m.deployFunctionIndex
 			m.deployForm = nil
-			m.deployCardIndex = -1
-			m.cards[cardIndex].deploying = true
-			m.cards[cardIndex].deployError = ""
-			m.statusLine = fmt.Sprintf("Deploying %s...", m.cards[cardIndex].requester.BinaryName())
+			m.deployFunctionIndex = -1
+			m.functions[functionIndex].deploying = true
+			m.functions[functionIndex].deployError = ""
+			m.statusLine = fmt.Sprintf(
+				"Deploying %s...",
+				m.functions[functionIndex].requester.BinaryName(),
+			)
 			return m, tea.Batch(cmd, deployFunctionCmd(
 				m.ctx,
-				cardIndex,
-				m.cards[cardIndex].binaryPath,
+				functionIndex,
+				m.functions[functionIndex].binaryPath,
 				name,
 			))
 		}
@@ -157,8 +160,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusLine = "Compilation failed."
 			return m, nil
 		}
-		for _, card := range m.cards {
-			card.binaryPath = msg.binaries[card.requester.BinaryName()]
+		for _, function := range m.functions {
+			function.binaryPath = msg.binaries[function.requester.BinaryName()]
 		}
 		m.setupStatus = "Starting the Servermore stack..."
 		m.statusLine = "Building containers and waiting for the stack to answer..."
@@ -175,22 +178,22 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusLine = "Stack is ready. Press Enter to deploy the selected function."
 		return m, nil
 	case deployDoneMsg:
-		card := m.cards[msg.cardIndex]
-		card.deploying = false
+		function := m.functions[msg.functionIndex]
+		function.deploying = false
 		if msg.err != nil {
-			card.deployError = msg.err.Error()
-			m.statusLine = fmt.Sprintf("Deploy %s failed.", card.requester.BinaryName())
+			function.deployError = msg.err.Error()
+			m.statusLine = fmt.Sprintf("Deploy %s failed.", function.requester.BinaryName())
 			return m, nil
 		}
 
 		workerCtx, workerCancel := context.WithCancel(m.ctx)
 		deployed := newDeploymentState(msg.name, msg.functionID, workerCancel)
-		card.deployed = deployed
-		card.deployError = ""
-		startWorker(workerCtx, &m.wg, card.requester, deployed)
+		function.deployed = deployed
+		function.deployError = ""
+		startWorker(workerCtx, &m.wg, function.requester, deployed)
 		m.statusLine = fmt.Sprintf(
 			"%s deployed as %q with function id %s.",
-			card.requester.BinaryName(),
+			function.requester.BinaryName(),
 			msg.name,
 			msg.functionID,
 		)
@@ -215,15 +218,15 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case "up", "k":
-		m.selectedCard = clampInt(m.selectedCard-1, 0, len(m.cards)-1)
+		m.selectedFunction = clampInt(m.selectedFunction-1, 0, len(m.functions)-1)
 		m.normalizeSelectedField()
 	case "down", "j":
-		m.selectedCard = clampInt(m.selectedCard+1, 0, len(m.cards)-1)
+		m.selectedFunction = clampInt(m.selectedFunction+1, 0, len(m.functions)-1)
 		m.normalizeSelectedField()
 	case "left", "h", "shift+tab":
-		m.selectedField = clampInt(m.selectedField-1, 0, m.selectedCardFieldCount()-1)
+		m.selectedField = clampInt(m.selectedField-1, 0, m.selectedFunctionFieldCount()-1)
 	case "right", "l", "tab":
-		m.selectedField = clampInt(m.selectedField+1, 0, m.selectedCardFieldCount()-1)
+		m.selectedField = clampInt(m.selectedField+1, 0, m.selectedFunctionFieldCount()-1)
 	case "+", "=":
 		if deployed := m.selectedDeployment(); deployed != nil {
 			deployed.AdjustSetting(m.selectedField, 1)
@@ -233,9 +236,9 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			deployed.AdjustSetting(m.selectedField, -1)
 		}
 	case "enter":
-		selectedCard := m.cards[m.selectedCard]
-		if selectedCard.deployed == nil && !selectedCard.deploying {
-			m.openDeployForm(m.selectedCard)
+		selected := m.functions[m.selectedFunction]
+		if selected.deployed == nil && !selected.deploying {
+			m.openDeployForm(m.selectedFunction)
 			return m, m.deployForm.Init()
 		}
 	}
@@ -249,19 +252,17 @@ func (m *model) View() tea.View {
 	if m.deployForm != nil {
 		return tea.NewView(m.renderDeployView(styles))
 	}
-
 	if m.phase == phaseSetup {
 		return tea.NewView(m.renderSetupView(styles))
 	}
-
 	return tea.NewView(m.renderDashboardView(styles))
 }
 
 func (m *model) Shutdown() {
 	m.cancel()
-	for _, card := range m.cards {
-		if card.deployed != nil {
-			card.deployed.Stop()
+	for _, function := range m.functions {
+		if function.deployed != nil {
+			function.deployed.Stop()
 		}
 	}
 	m.wg.Wait()
@@ -276,18 +277,18 @@ func (m *model) Shutdown() {
 }
 
 func (m *model) requesters() []Requester {
-	requesters := make([]Requester, 0, len(m.cards))
-	for _, card := range m.cards {
-		requesters = append(requesters, card.requester)
+	requesters := make([]Requester, 0, len(m.functions))
+	for _, function := range m.functions {
+		requesters = append(requesters, function.requester)
 	}
 	return requesters
 }
 
 func (m *model) selectedDeployment() *deploymentState {
-	return m.cards[m.selectedCard].deployed
+	return m.functions[m.selectedFunction].deployed
 }
 
-func (m *model) selectedCardFieldCount() int {
+func (m *model) selectedFunctionFieldCount() int {
 	if m.selectedDeployment() == nil {
 		return 1
 	}
@@ -295,13 +296,13 @@ func (m *model) selectedCardFieldCount() int {
 }
 
 func (m *model) normalizeSelectedField() {
-	m.selectedField = clampInt(m.selectedField, 0, m.selectedCardFieldCount()-1)
+	m.selectedField = clampInt(m.selectedField, 0, m.selectedFunctionFieldCount()-1)
 }
 
-func (m *model) openDeployForm(cardIndex int) {
-	card := m.cards[cardIndex]
-	m.deployCardIndex = cardIndex
-	m.deployName = card.requester.SuggestedName()
+func (m *model) openDeployForm(functionIndex int) {
+	function := m.functions[functionIndex]
+	m.deployFunctionIndex = functionIndex
+	m.deployName = function.requester.SuggestedName()
 	m.deployForm = huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().
@@ -319,7 +320,10 @@ func (m *model) openDeployForm(cardIndex int) {
 	).
 		WithWidth(minInt(72, maxInt(48, m.width-10))).
 		WithShowHelp(false)
-	m.statusLine = fmt.Sprintf("Deploying %s. Press Esc to cancel.", card.requester.BinaryName())
+	m.statusLine = fmt.Sprintf(
+		"Deploying %s. Press Esc to cancel.",
+		function.requester.BinaryName(),
+	)
 }
 
 func (m *model) renderSetupView(styles viewStyles) string {
@@ -327,7 +331,7 @@ func (m *model) renderSetupView(styles viewStyles) string {
 	body := []string{
 		styles.Title.Render("Servermore Tester"),
 		"",
-		styles.CardTitle.Render(spinner + " " + m.setupStatus),
+		styles.SectionTitle.Render(spinner + " " + m.setupStatus),
 		styles.Muted.Render(m.statusLine),
 	}
 
@@ -346,26 +350,24 @@ func (m *model) renderSetupView(styles viewStyles) string {
 	}
 	body = append(body, "", styles.Help.Render("q quits"))
 
-	content := styles.Panel.Width(maxInt(60, minInt(100, m.width-8))).
-		Render(strings.Join(body, "\n"))
+	content := styles.Panel.Width(maxInt(60, minInt(100, m.width-8))).Render(strings.Join(body, "\n"))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
 func (m *model) renderDeployView(styles viewStyles) string {
-	card := m.cards[m.deployCardIndex]
+	function := m.functions[m.deployFunctionIndex]
 	sections := []string{
 		styles.Title.Render("Deploy Function"),
 		"",
-		styles.Muted.Render("Binary: " + card.requester.BinaryName()),
-		styles.Muted.Render(card.requester.Description()),
+		styles.Muted.Render("Binary: " + function.requester.BinaryName()),
+		styles.Muted.Render(function.requester.Description()),
 		"",
 		strings.TrimSpace(m.deployForm.View()),
 		"",
 		styles.Help.Render("enter submits | esc cancels"),
 	}
 
-	content := styles.Panel.Width(maxInt(60, minInt(90, m.width-8))).
-		Render(strings.Join(sections, "\n"))
+	content := styles.Panel.Width(maxInt(60, minInt(90, m.width-8))).Render(strings.Join(sections, "\n"))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 
@@ -376,187 +378,97 @@ func (m *model) renderDashboardView(styles viewStyles) string {
 			"Compile test binaries, deploy them into the local stack, and keep live traffic running.",
 		),
 		"",
-		m.renderTabs(styles),
+		m.renderFunctionSelector(styles),
 		"",
 		styles.Status.Render(m.statusLine),
 		"",
-		m.renderCard(styles, m.cards[m.selectedCard], m.selectedCard, maxInt(60, minInt(110, m.width-8))),
+		m.renderFunctionPanel(
+			styles,
+			m.functions[m.selectedFunction],
+			maxInt(60, minInt(110, m.width-8)),
+		),
 		"",
 		styles.Help.Render(
-			"up/down switch tabs | left/right choose setting | enter deploy | +/- adjust | 0 pauses traffic | q quits",
+			"up/down switch functions | left/right choose setting | enter deploy | +/- adjust | q quits",
 		),
 	}
 	return styles.App.Width(maxInt(80, m.width)).Render(strings.Join(parts, "\n"))
 }
 
-func (m *model) renderTabs(styles viewStyles) string {
-	tabs := make([]string, 0, len(m.cards))
-	for index, card := range m.cards {
-		label := strings.ToUpper(card.requester.BinaryName())
-		if index == m.selectedCard {
-			tabs = append(tabs, styles.TabSelected.Render(" "+label+" "))
+func (m *model) renderFunctionSelector(styles viewStyles) string {
+	selectors := make([]string, 0, len(m.functions))
+	for index, function := range m.functions {
+		label := strings.ToUpper(function.requester.BinaryName())
+		if index == m.selectedFunction {
+			selectors = append(selectors, styles.SelectorSelected.Render(" "+label+" "))
 			continue
 		}
-		tabs = append(tabs, styles.Tab.Render(" "+label+" "))
+		selectors = append(selectors, styles.Selector.Render(" "+label+" "))
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Bottom, tabs...)
+	return lipgloss.JoinHorizontal(lipgloss.Bottom, selectors...)
 }
 
-func (m *model) renderCards(styles viewStyles) string {
-	columns := 1
-	if m.width >= 150 {
-		columns = 2
-	}
-	cardGap := 2
-	cardWidth := maxInt(42, (m.width-6-cardGap*(columns-1))/columns)
-
-	rendered := make([]string, 0, len(m.cards))
-	for index, card := range m.cards {
-		rendered = append(rendered, m.renderCard(styles, card, index, cardWidth))
-	}
-
-	if columns == 1 {
-		return strings.Join(rendered, "\n\n")
-	}
-
-	rows := make([]string, 0, (len(rendered)+1)/2)
-	for i := 0; i < len(rendered); i += 2 {
-		left := rendered[i]
-		right := ""
-		if i+1 < len(rendered) {
-			right = rendered[i+1]
-		}
-		rows = append(
-			rows,
-			lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", cardGap)+right),
-		)
-	}
-	return strings.Join(rows, "\n\n")
-}
-
-func (m *model) renderCard(styles viewStyles, card *functionCard, index int, width int) string {
-	isSelected := index == m.selectedCard
-	cardStyle := styles.Card.Width(width)
-	if isSelected {
-		cardStyle = styles.CardFocused.Width(width)
-	}
-
+func (m *model) renderFunctionPanel(
+	styles viewStyles,
+	function *functionEntry,
+	width int,
+) string {
 	sections := []string{
-		styles.CardTitle.Render(strings.ToUpper(card.requester.BinaryName())),
-		styles.Muted.Render(card.requester.Description()),
+		styles.FunctionTitle.Render(strings.ToUpper(function.requester.BinaryName())),
+		styles.Muted.Render(function.requester.Description()),
 	}
 
-	if card.deploying {
+	if function.deploying {
 		sections = append(sections, "", styles.Status.Render("Deploying..."))
-	} else if card.deployed == nil {
-		action := "[ Deploy function ]"
-		if isSelected {
-			action = styles.SelectedField.Render(action)
-		} else {
-			action = styles.FieldValue.Render(action)
-		}
-		sections = append(sections, "", action)
-		if card.deployError != "" {
-			sections = append(sections, styles.Error.Render(compactText(card.deployError, 180)))
+	} else if function.deployed == nil {
+		sections = append(sections, "", styles.SelectedField.Render("[ Deploy function ]"))
+		if function.deployError != "" {
+			sections = append(sections, styles.Error.Render(compactText(function.deployError, 180)))
 		}
 	} else {
-		snapshot := card.deployed.Snapshot()
+		snapshot := function.deployed.Snapshot()
 		sections = append(
 			sections,
 			"",
 			styles.FieldLabel.Render("Name: ")+styles.FieldValue.Render(snapshot.Name),
 			styles.FieldLabel.Render("Function ID: ")+styles.FieldValue.Render(snapshot.FunctionID),
 			"",
-			m.renderSetting(
-				styles,
-				isSelected && m.selectedField == 0,
-				"Batch size",
-				fmt.Sprintf("%d", snapshot.Settings.BatchSize),
-			),
-			m.renderSetting(
-				styles,
-				isSelected && m.selectedField == 1,
-				"Requests/s",
-				fmt.Sprintf("%d", snapshot.Settings.RequestsPerSecond),
-			),
-			m.renderSetting(
-				styles,
-				isSelected && m.selectedField == 2,
-				"Delay (s)",
-				fmt.Sprintf("%d", snapshot.Settings.DelayBetweenBatches),
-			),
+			m.renderSetting(styles, m.selectedField == 0, "Batch size", fmt.Sprintf("%d", snapshot.Settings.BatchSize)),
+			m.renderSetting(styles, m.selectedField == 1, "Requests/s", fmt.Sprintf("%d", snapshot.Settings.RequestsPerSecond)),
+			m.renderSetting(styles, m.selectedField == 2, "Delay (s)", fmt.Sprintf("%d", snapshot.Settings.DelayBetweenBatches)),
 			"",
-			styles.FieldLabel.Render(
-				"Sent: ",
-			)+styles.FieldValue.Render(
-				fmt.Sprintf("%d", snapshot.Stats.RequestsSent),
-			),
-			styles.FieldLabel.Render(
-				"Responses: ",
-			)+styles.FieldValue.Render(
-				fmt.Sprintf("%d", snapshot.Stats.ResponsesReceived),
-			),
-			styles.FieldLabel.Render(
-				"Transport errors: ",
-			)+styles.FieldValue.Render(
-				fmt.Sprintf("%d", snapshot.Stats.TransportErrors),
-			),
-			styles.FieldLabel.Render(
-				"Batches: ",
-			)+styles.FieldValue.Render(
-				fmt.Sprintf("%d", snapshot.Stats.BatchesCompleted),
-			),
+			styles.FieldLabel.Render("Sent: ")+styles.FieldValue.Render(fmt.Sprintf("%d", snapshot.Stats.RequestsSent)),
+			styles.FieldLabel.Render("Responses: ")+styles.FieldValue.Render(fmt.Sprintf("%d", snapshot.Stats.ResponsesReceived)),
+			styles.FieldLabel.Render("Transport errors: ")+styles.FieldValue.Render(fmt.Sprintf("%d", snapshot.Stats.TransportErrors)),
+			styles.FieldLabel.Render("Batches: ")+styles.FieldValue.Render(fmt.Sprintf("%d", snapshot.Stats.BatchesCompleted)),
 		)
 
 		if snapshot.Stats.LastPath != "" {
-			sections = append(
-				sections,
-				styles.FieldLabel.Render(
-					"Last request: ",
-				)+styles.FieldValue.Render(
-					snapshot.Stats.LastMethod+" "+snapshot.Stats.LastPath,
-				),
+			sections = append(sections,
+				styles.FieldLabel.Render("Last request: ")+styles.FieldValue.Render(snapshot.Stats.LastMethod+" "+snapshot.Stats.LastPath),
 			)
 		}
 		if snapshot.Stats.LastStatusCode != 0 {
-			sections = append(
-				sections,
-				styles.FieldLabel.Render(
-					"Last status: ",
-				)+styles.FieldValue.Render(
-					fmt.Sprintf("%d", snapshot.Stats.LastStatusCode),
-				),
+			sections = append(sections,
+				styles.FieldLabel.Render("Last status: ")+styles.FieldValue.Render(fmt.Sprintf("%d", snapshot.Stats.LastStatusCode)),
 			)
 		}
 		if snapshot.Stats.LastDuration > 0 {
-			sections = append(
-				sections,
-				styles.FieldLabel.Render(
-					"Last latency: ",
-				)+styles.FieldValue.Render(
-					snapshot.Stats.LastDuration.String(),
-				),
+			sections = append(sections,
+				styles.FieldLabel.Render("Last latency: ")+styles.FieldValue.Render(snapshot.Stats.LastDuration.String()),
 			)
 		}
 		if snapshot.Stats.LastResponse != "" {
-			sections = append(
-				sections,
-				styles.FieldLabel.Render(
-					"Last response: ",
-				)+styles.FieldValue.Render(
-					snapshot.Stats.LastResponse,
-				),
+			sections = append(sections,
+				styles.FieldLabel.Render("Last response: ")+styles.FieldValue.Render(snapshot.Stats.LastResponse),
 			)
 		}
 		if snapshot.Stats.LastError != "" {
-			sections = append(
-				sections,
-				styles.Error.Render("Last error: "+snapshot.Stats.LastError),
-			)
+			sections = append(sections, styles.Error.Render("Last error: "+snapshot.Stats.LastError))
 		}
 	}
 
-	return cardStyle.Render(strings.Join(sections, "\n"))
+	return styles.FunctionPanel.Width(width).Render(strings.Join(sections, "\n"))
 }
 
 func (m *model) renderSetting(styles viewStyles, selected bool, label string, value string) string {
@@ -568,22 +480,22 @@ func (m *model) renderSetting(styles viewStyles, selected bool, label string, va
 }
 
 type viewStyles struct {
-	App           lipgloss.Style
-	Panel         lipgloss.Style
-	Title         lipgloss.Style
-	Muted         lipgloss.Style
-	Status        lipgloss.Style
-	Help          lipgloss.Style
-	Error         lipgloss.Style
-	Output        lipgloss.Style
-	Tab           lipgloss.Style
-	TabSelected   lipgloss.Style
-	Card          lipgloss.Style
-	CardFocused   lipgloss.Style
-	CardTitle     lipgloss.Style
-	FieldLabel    lipgloss.Style
-	FieldValue    lipgloss.Style
-	SelectedField lipgloss.Style
+	App              lipgloss.Style
+	Panel            lipgloss.Style
+	Title            lipgloss.Style
+	Muted            lipgloss.Style
+	Status           lipgloss.Style
+	Help             lipgloss.Style
+	Error            lipgloss.Style
+	Output           lipgloss.Style
+	Selector         lipgloss.Style
+	SelectorSelected lipgloss.Style
+	FunctionPanel    lipgloss.Style
+	SectionTitle     lipgloss.Style
+	FunctionTitle    lipgloss.Style
+	FieldLabel       lipgloss.Style
+	FieldValue       lipgloss.Style
+	SelectedField    lipgloss.Style
 }
 
 func newStyles() viewStyles {
@@ -601,28 +513,25 @@ func newStyles() viewStyles {
 			Foreground(lipgloss.Color("229")).
 			Background(lipgloss.Color("24")).
 			Padding(0, 1),
-		Help: lipgloss.NewStyle().Foreground(lipgloss.Color("243")),
-		Error: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("203")).
-			Bold(true),
+		Help:   lipgloss.NewStyle().Foreground(lipgloss.Color("243")),
+		Error:  lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true),
 		Output: lipgloss.NewStyle().Foreground(lipgloss.Color("250")),
-		Tab: lipgloss.NewStyle().
+		Selector: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("246")).
 			Padding(0, 1),
-		TabSelected: lipgloss.NewStyle().
+		SelectorSelected: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("16")).
 			Background(lipgloss.Color("86")).
 			Bold(true).
 			Padding(0, 1),
-		Card: lipgloss.NewStyle().
-			Border(appBorder).
-			BorderForeground(lipgloss.Color("240")).
-			Padding(1, 1),
-		CardFocused: lipgloss.NewStyle().
+		FunctionPanel: lipgloss.NewStyle().
 			Border(appBorder).
 			BorderForeground(lipgloss.Color("86")).
 			Padding(1, 1),
-		CardTitle: lipgloss.NewStyle().
+		SectionTitle: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("111")),
+		FunctionTitle: lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("111")),
 		FieldLabel: lipgloss.NewStyle().Foreground(lipgloss.Color("246")),
