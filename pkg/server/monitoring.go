@@ -373,6 +373,11 @@ func SetDefaultLogger(opts MonitoringOpts) {
 	slog.SetDefault(slogLogger(opts, &slog.HandlerOptions{Level: opts.Level}))
 }
 
+func InjectTraceContext(ctx context.Context, req *http.Request) error {
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
+	return nil
+}
+
 func slogHandler(opts MonitoringOpts, slogOpts *slog.HandlerOptions) slog.Handler {
 	if opts.IsDev() {
 		return slog.NewTextHandler(os.Stdout, slogOpts)

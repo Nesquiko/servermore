@@ -58,7 +58,10 @@ func newRunnerGrpcServer(
 	}
 
 	commanderHttpAddr := fmt.Sprintf("http://%s:%s", conf.CommanderHost, conf.CommanderHttpPort)
-	httpClient, err := commanderclient.NewClient(commanderHttpAddr)
+	httpClient, err := commanderclient.NewClient(
+		commanderHttpAddr,
+		commanderclient.WithRequestEditorFn(server.InjectTraceContext),
+	)
 	if err != nil {
 		slog.Error(
 			"failed to initialize http commander client",
@@ -96,7 +99,10 @@ func newRunnerGrpcServer(
 }
 
 func (r *runnerGrpcServer) registerWithCommander(ctx context.Context, addr string) error {
-	resp, err := r.commanderGrpcClient.RegisterRunner(ctx, &commandergrpc.RegisterRunnerRequest{Addr: addr})
+	resp, err := r.commanderGrpcClient.RegisterRunner(
+		ctx,
+		&commandergrpc.RegisterRunnerRequest{Addr: addr},
+	)
 	if err != nil {
 		return fmt.Errorf("registration with commander failed: %w", err)
 	}
