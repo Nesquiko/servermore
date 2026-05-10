@@ -376,15 +376,30 @@ func (m *model) renderDashboardView(styles viewStyles) string {
 			"Compile test binaries, deploy them into the local stack, and keep live traffic running.",
 		),
 		"",
+		m.renderTabs(styles),
+		"",
 		styles.Status.Render(m.statusLine),
 		"",
-		m.renderCards(styles),
+		m.renderCard(styles, m.cards[m.selectedCard], m.selectedCard, maxInt(60, minInt(110, m.width-8))),
 		"",
 		styles.Help.Render(
-			"up/down choose card | left/right choose setting | enter deploy | +/- adjust | 0 pauses traffic | q quits",
+			"up/down switch tabs | left/right choose setting | enter deploy | +/- adjust | 0 pauses traffic | q quits",
 		),
 	}
 	return styles.App.Width(maxInt(80, m.width)).Render(strings.Join(parts, "\n"))
+}
+
+func (m *model) renderTabs(styles viewStyles) string {
+	tabs := make([]string, 0, len(m.cards))
+	for index, card := range m.cards {
+		label := strings.ToUpper(card.requester.BinaryName())
+		if index == m.selectedCard {
+			tabs = append(tabs, styles.TabSelected.Render(" "+label+" "))
+			continue
+		}
+		tabs = append(tabs, styles.Tab.Render(" "+label+" "))
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Bottom, tabs...)
 }
 
 func (m *model) renderCards(styles viewStyles) string {
@@ -561,6 +576,8 @@ type viewStyles struct {
 	Help          lipgloss.Style
 	Error         lipgloss.Style
 	Output        lipgloss.Style
+	Tab           lipgloss.Style
+	TabSelected   lipgloss.Style
 	Card          lipgloss.Style
 	CardFocused   lipgloss.Style
 	CardTitle     lipgloss.Style
@@ -589,6 +606,14 @@ func newStyles() viewStyles {
 			Foreground(lipgloss.Color("203")).
 			Bold(true),
 		Output: lipgloss.NewStyle().Foreground(lipgloss.Color("250")),
+		Tab: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("246")).
+			Padding(0, 1),
+		TabSelected: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("16")).
+			Background(lipgloss.Color("86")).
+			Bold(true).
+			Padding(0, 1),
 		Card: lipgloss.NewStyle().
 			Border(appBorder).
 			BorderForeground(lipgloss.Color("240")).
