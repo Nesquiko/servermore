@@ -216,7 +216,7 @@ func newRunnerCheckService(
 
 	cache := caching.NewInMemoryCache()
 	router := routing.NewNaiveRouter(1, 1)
-	svc := commander.NewCommanderService(
+	svc, err := commander.NewCommanderService(
 		db,
 		funcStorage,
 		cache,
@@ -225,6 +225,7 @@ func newRunnerCheckService(
 			RunnerClientOpts: server.MonitoringOpts{Env: server.TEST, AppName: "runner-check-test"},
 		},
 	)
+	require.NoError(t, err)
 
 	return svc, cache, db
 }

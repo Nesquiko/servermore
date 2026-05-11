@@ -29,6 +29,7 @@ type CommanderService struct {
 	funcStorage *FileSystemFunctionStorage
 	cache       caching.RoutingCache
 	router      routing.Router
+	metrics     *CommanderMetrics
 
 	config CommanderServiceConfig
 }
@@ -44,14 +45,27 @@ func NewCommanderService(
 	cache caching.RoutingCache,
 	router routing.Router,
 	config CommanderServiceConfig,
-) *CommanderService {
+) (*CommanderService, error) {
+	metrics, err := NewCommanderMetrics(db, cache)
+	if err != nil {
+		return nil, err
+	}
+
 	return &CommanderService{
 		db:          db,
 		funcStorage: funcStorage,
 		config:      config,
 		router:      router,
 		cache:       cache,
+		metrics:     metrics,
+	}, nil
+}
+
+func (svc *CommanderService) Close() {
+	if svc == nil || svc.metrics == nil {
+		return
 	}
+	svc.metrics.Close()
 }
 
 func (svc *CommanderService) PollRunnerHeartbeats(
@@ -142,6 +156,7 @@ func (svc *CommanderService) pollRunnerHeartbeat(
 			"time", executedAt,
 			"error", err,
 		)
+		return
 	}
 }
 

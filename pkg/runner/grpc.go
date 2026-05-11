@@ -37,14 +37,14 @@ type runnerGrpcServer struct {
 	instanceShutdownAfter time.Duration
 	instanceGracePeriod   time.Duration
 
-	monitoringOpts   server.MonitoringOpts
-	metricsCollector *MetricsCollector
+	monitoringOpts server.MonitoringOpts
+	systemMetrics  *SystemMetricsCollector
+	metrics        *RunnerMetrics
 }
 
 var _ runnergrpc.RunnerServer = (*runnerGrpcServer)(nil)
 
 func newRunnerGrpcServer(
-	ctx context.Context,
 	conf RunnerConfig,
 	monitoringOpts server.MonitoringOpts,
 ) (*runnerGrpcServer, func(), error) {
@@ -85,17 +85,31 @@ func newRunnerGrpcServer(
 		server.Close(conn)
 	}
 
+	instances := NewInstanceStates()
+	runnerMetrics, err := NewRunnerMetrics(instances)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to initialize runner metrics: %w", err)
+	}
+
 	return &runnerGrpcServer{
 		commanderGrpcClient:   commandergrpc.NewCommanderClient(conn),
 		commanderHttpClient:   httpClient,
-		instances:             NewInstanceStates(),
+		instances:             instances,
 		downloads:             NewDownloadsSyncMap(),
 		instanceShutdownAfter: conf.InstanceShutdownAfter,
 		instanceGracePeriod:   conf.InstanceGracePeriod,
 		monitoringOpts:        monitoringOpts,
 		downloadsStorageRoot:  conf.FuncStorageRoot,
-		metricsCollector:      NewMetricsCollector(),
+		systemMetrics:         NewSystemMetricsCollector(),
+		metrics:               runnerMetrics,
 	}, closer, nil
+}
+
+func (r *runnerGrpcServer) Close() {
+	if r == nil || r.metrics == nil {
+		return
+	}
+	r.metrics.Close()
 }
 
 func (r *runnerGrpcServer) registerWithCommander(ctx context.Context, addr string) error {
@@ -118,7 +132,7 @@ func (r *runnerGrpcServer) Heartbeat(
 	*runnergrpc.HeartbeatRequest,
 ) (*runnergrpc.HeartbeatResponse, error) {
 	depths := r.instances.QueueDepths(r.instanceGracePeriod)
-	metrics, err := r.metricsCollector.Collect()
+	metrics, err := r.systemMetrics.Collect()
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect metrics: %w", err)
 	}
@@ -134,6 +148,13 @@ func (r *runnerGrpcServer) PrepareFunctionInstance(
 	ctx context.Context,
 	req *runnergrpc.PrepareInstanceRequest,
 ) (*runnergrpc.PrepareInstanceResponse, error) {
+	startInstance := func(funcFilePath server.AbsolutePath) (uuid.UUID, error) {
+		startStartedAt := time.Now()
+		instanceId, err := r.startInstance(ctx, funcFilePath)
+		r.metrics.RecordPrepareStart(ctx, time.Since(startStartedAt))
+		return instanceId, err
+	}
+
 	funcPath := r.pathOnRunner(req.FunctionPath)
 	meta := &server.DownloadMeta{FunctionID: req.FunctionId, DownloadPath: req.FunctionPath}
 	server.SetDownloadMeta(ctx, meta)
@@ -146,7 +167,7 @@ func (r *runnerGrpcServer) PrepareFunctionInstance(
 	if exists {
 		meta.ReusedFromFS = true
 		meta.StoredPath = funcPath
-		instanceId, err := r.startInstance(ctx, funcPath)
+		instanceId, err := startInstance(funcPath)
 		if err != nil {
 			return nil, fmt.Errorf("starting instance failed: %w", err)
 		}
@@ -169,7 +190,7 @@ func (r *runnerGrpcServer) PrepareFunctionInstance(
 			}
 			meta.StoredPath = downloadResult.path
 
-			instanceId, err := r.startInstance(ctx, downloadResult.path)
+			instanceId, err := startInstance(downloadResult.path)
 			if err != nil {
 				return nil, fmt.Errorf("starting instance downloaded by other failed: %w", err)
 			}
@@ -186,12 +207,13 @@ func (r *runnerGrpcServer) PrepareFunctionInstance(
 	if err != nil {
 		return nil, fmt.Errorf("download errored: %w", err)
 	}
+	r.metrics.RecordPrepareDownload(ctx, downloadTook)
 	meta.Downloaded = true
 	meta.StoredPath = funcFilePath
 	meta.BytesWritten = bytesWritten
 	meta.DownloadTook = downloadTook
 
-	instanceId, err := r.startInstance(ctx, funcFilePath)
+	instanceId, err := startInstance(funcFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("starting downloaded instance failed: %w", err)
 	}
@@ -205,6 +227,7 @@ func (r *runnerGrpcServer) startInstance(
 	ctx context.Context,
 	funcFilePath server.AbsolutePath,
 ) (uuid.UUID, error) {
+	startStartedAt := time.Now()
 	instanceId, err := uuid.NewV7()
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("failed to construct uuid v7: %w", err)
@@ -226,6 +249,7 @@ func (r *runnerGrpcServer) startInstance(
 
 		meta.InstanceID = idResult.instanceId.String()
 		meta.ReusedAssigned = true
+		meta.StartTook = time.Since(startStartedAt)
 		return idResult.instanceId, nil
 	}
 
@@ -236,12 +260,14 @@ func (r *runnerGrpcServer) startInstance(
 	if err != nil {
 		r.instances.RemoveStartingInstance(funcFilePath)
 		idConsumers.SubmitResult(StartInstanceResult{err: err})
+		meta.StartTook = time.Since(startStartedAt)
 		return uuid.Nil, fmt.Errorf("failed to start the instance: %w", err)
 	}
 	instance := r.instances.Submit(funcFilePath, instanceId, r.instanceShutdownAfter, funcRuntime)
 	go r.shutdownAfterTime(instance)
 
 	idConsumers.SubmitResult(StartInstanceResult{instanceId: instanceId})
+	meta.StartTook = time.Since(startStartedAt)
 
 	return instanceId, nil
 }
@@ -257,6 +283,7 @@ func (r *runnerGrpcServer) InvokeFunctionInstance(
 	req *runnergrpc.InvokeInstanceRequest,
 ) (*runnergrpc.InvokeInstanceResponse, error) {
 	startTime := time.Now()
+
 	meta := &server.InvokeMeta{
 		InstanceID:       req.InstanceId,
 		Method:           req.Method,
@@ -342,6 +369,8 @@ outer:
 			stopCancel()
 			invokeCancel()
 			guestInvokeTook := time.Since(guestStart)
+			r.metrics.RecordInvokeQueueWait(req.ctx, queueWaitTook)
+			r.metrics.RecordInvokeGuestDuration(req.ctx, guestInvokeTook)
 			if err != nil {
 				req.resCh <- &InvocationResult{err: err, queueWaitTook: queueWaitTook, guestInvokeTook: guestInvokeTook}
 			} else {

@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,7 +14,7 @@ import (
 	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
 	"github.com/go-chi/chi/v5"
-	"google.golang.org/grpc"
+	grpc "google.golang.org/grpc"
 )
 
 const FunctionIdPathParam = "functionId"
@@ -64,7 +65,7 @@ func (h *gatewayHandler) processFunctionRequest(w http.ResponseWriter, r *http.R
 	meta.RunnerAddr = routeResp.RunnerAddr
 	meta.InstanceID = routeResp.InstanceId
 
-	runnerConn, reused, err := h.runnerConn(routeResp.RunnerAddr)
+	runnerConn, reused, err := h.runnerConn(r.Context(), routeResp.RunnerAddr)
 	if err != nil {
 		server.InternalServerError(w, r, err)
 		return
@@ -129,7 +130,10 @@ func (h *gatewayHandler) processFunctionRequest(w http.ResponseWriter, r *http.R
 	}
 }
 
-func (h *gatewayHandler) runnerConn(addr string) (*grpc.ClientConn, bool, error) {
+func (h *gatewayHandler) runnerConn(
+	ctx context.Context,
+	addr string,
+) (*grpc.ClientConn, bool, error) {
 	// first optimistic check
 	h.runnersMu.RLock()
 	conn, ok := h.runners[addr]

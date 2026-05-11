@@ -50,10 +50,11 @@ func Run(ctx context.Context, conf RunnerConfig) error {
 		return fmt.Errorf("OTEL initialization failed: %w", err)
 	}
 
-	runnerServer, runnerCloser, err := newRunnerGrpcServer(ctx, conf, monitoringOpts)
+	runnerServer, runnerCloser, err := newRunnerGrpcServer(conf, monitoringOpts)
 	if err != nil {
 		return fmt.Errorf("failed to initialize runner: %w", err)
 	}
+	defer runnerServer.Close()
 
 	lis, err := net.Listen("tcp", conf.Addr)
 	if err != nil {

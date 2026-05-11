@@ -77,13 +77,17 @@ func Run(ctx context.Context, cache caching.RoutingCache, conf CommanderConfig) 
 		conf.InstanceOverloadedQueueSize,
 		conf.RunnerOverloadedQueueSize,
 	)
-	svc := NewCommanderService(
+	svc, err := NewCommanderService(
 		db,
 		funcStorage,
 		cache,
 		router,
 		CommanderServiceConfig{RunnerClientOpts: server.MonitoringOpts{Env: conf.Env, AppName: conf.AppName, OTELOn: conf.OTELOn}},
 	)
+	if err != nil {
+		return fmt.Errorf("failed to initialize commander service: %w", err)
+	}
+	defer svc.Close()
 	runnerHeartbeatPolling(ctx, conf, svc)
 
 	httpCloser, httpErrCh, err := runHttp(conf, svc, otelCfg, monitoringOpts)

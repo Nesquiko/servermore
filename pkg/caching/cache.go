@@ -15,6 +15,9 @@ type RoutingCache interface {
 	// StatsPerRunner returns (last known) runner resource metrics
 	StatsPerRunner(ctx context.Context) (map[string]ResourceMetrics, error)
 
+	// CachedInstancesCount returns the number of cached instances.
+	CachedInstancesCount(ctx context.Context) (int, error)
+
 	// SetInstance registers or updates a function instance and its runner.
 	SetInstance(ctx context.Context, funcId, instanceId, runnerAddr string, queueLen int) error
 

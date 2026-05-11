@@ -68,12 +68,15 @@ func Run(ctx context.Context, conf GatewayConfig) error {
 	}
 	defer server.Close(conn)
 
-	h, httpHandler := createHttpHandler(
+	h, httpHandler, err := createHttpHandler(
 		commanderClient,
 		otelCfg,
 		monitoringOpts,
 		runnerClientOpts,
 	)
+	if err != nil {
+		return err
+	}
 	defer h.Close()
 
 	httpServer := &http.Server{
@@ -114,7 +117,7 @@ func createHttpHandler(
 	otelCfg otelchimetric.BaseConfig,
 	monitoringOpts server.MonitoringOpts,
 	runnerMonitoringOpts server.MonitoringOpts,
-) (*gatewayHandler, http.Handler) {
+) (*gatewayHandler, http.Handler, error) {
 	r := chi.NewRouter()
 	baseUrl := fmt.Sprintf("/{%s}", FunctionIdPathParam)
 
@@ -137,5 +140,5 @@ func createHttpHandler(
 		r.HandleFunc("/*", h.processFunctionRequest)
 	})
 
-	return h, r
+	return h, r, nil
 }
