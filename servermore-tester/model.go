@@ -66,6 +66,7 @@ type model struct {
 	spinnerIndex int
 	setupStatus  string
 	setupOutput  string
+	setupStream  *rollingLog
 	setupErr     error
 	setupPolls   int
 
@@ -80,6 +81,7 @@ type model struct {
 	selectedField    int
 	statusLine       string
 	stackStarted     bool
+	stackStarting    bool
 	shuttingDown     bool
 
 	deployFunctionIndex int
@@ -189,9 +191,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case compileDoneMsg:
 		m.setupOutput = msg.output
+		m.setupStream = newRollingLog(10)
+		m.stackStarting = true
 		if msg.err != nil {
 			m.setupErr = msg.err
 			m.statusLine = "Compilation failed."
+			m.stackStarting = false
 			return m, nil
 		}
 		for _, function := range m.functions {
@@ -199,10 +204,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setupStatus = "Starting the Servermore stack..."
 		m.statusLine = "Building containers and waiting for the stack to answer..."
-		return m, startStackCmd(m.ctx, m.rootDir)
+		return m, startStackCmd(m.ctx, m.rootDir, m.setupStream)
 	case stackReadyMsg:
 		m.setupOutput = msg.output
 		m.stackStarted = msg.started
+		m.stackStarting = false
+		m.setupStream = nil
 		if msg.err != nil {
 			m.setupErr = msg.err
 			m.statusLine = "Stack startup failed."
@@ -436,6 +443,10 @@ func (m *model) openDeployForm(functionIndex int) {
 
 func (m *model) renderSetupView(styles viewStyles) string {
 	spinner := spinnerFrames[m.spinnerIndex]
+	output := m.setupOutput
+	if m.stackStarting && m.setupStream != nil {
+		output = m.setupStream.Snapshot()
+	}
 	body := []string{
 		styles.Title.Render("Servermore Tester"),
 		"",
@@ -449,16 +460,16 @@ func (m *model) renderSetupView(styles viewStyles) string {
 			styles.Error.Render("Error: "+m.setupErr.Error()),
 		)
 	}
-	if strings.TrimSpace(m.setupOutput) != "" {
+	if strings.TrimSpace(output) != "" {
 		body = append(body,
 			"",
 			styles.Help.Render("Recent command output:"),
-			styles.Output.Width(maxInt(40, m.width-12)).Render(compactText(m.setupOutput, 800)),
+			styles.Output.Width(maxInt(60, m.width-14)).Render(compactText(output, 800)),
 		)
 	}
 	body = append(body, "", styles.Help.Render("q quits"))
 
-	content := styles.Panel.Width(maxInt(60, minInt(100, m.width-8))).Render(strings.Join(body, "\n"))
+	content := styles.Panel.Width(maxInt(90, minInt(140, m.width-4))).Render(strings.Join(body, "\n"))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, content)
 }
 

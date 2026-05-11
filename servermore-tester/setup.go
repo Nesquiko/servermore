@@ -1,14 +1,17 @@
 package servermoretester
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -47,6 +50,37 @@ type dozzleStartMsg struct {
 	containerID string
 	url         string
 	err         error
+}
+
+type rollingLog struct {
+	mu    sync.RWMutex
+	max   int
+	lines []string
+}
+
+func newRollingLog(max int) *rollingLog {
+	return &rollingLog{max: max}
+}
+
+func (r *rollingLog) Add(line string) {
+	line = strings.TrimRight(line, "\r\n")
+	if strings.TrimSpace(line) == "" {
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lines = append(r.lines, line)
+	if r.max > 0 && len(r.lines) > r.max {
+		copy(r.lines, r.lines[len(r.lines)-r.max:])
+		r.lines = r.lines[:r.max]
+	}
+}
+
+func (r *rollingLog) Snapshot() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return strings.Join(append([]string(nil), r.lines...), "\n")
 }
 
 type stackShutdownDoneMsg struct {
@@ -120,9 +154,9 @@ func compileFunctions(
 	return binaries, strings.Join(logs, "\n\n"), nil
 }
 
-func startStackCmd(ctx context.Context, rootDir string) tea.Cmd {
+func startStackCmd(ctx context.Context, rootDir string, logs *rollingLog) tea.Cmd {
 	return func() tea.Msg {
-		output, started, err := startStack(ctx, rootDir)
+		output, started, err := startStack(ctx, rootDir, logs)
 		return stackReadyMsg{output: output, started: started, err: err}
 	}
 }
@@ -154,9 +188,11 @@ func shutdownStackCmd(rootDir string) tea.Cmd {
 	}
 }
 
-func startStack(ctx context.Context, rootDir string) (string, bool, error) {
+func startStack(ctx context.Context, rootDir string, logs *rollingLog) (string, bool, error) {
 	composeFile := filepath.Join(rootDir, composeRelPath)
-	var logs []string
+	if logs == nil {
+		logs = newRollingLog(10)
+	}
 
 	_, downOutput, downErr := runCommand(
 		ctx,
@@ -170,30 +206,62 @@ func startStack(ctx context.Context, rootDir string) (string, bool, error) {
 		"--remove-orphans",
 	)
 	if strings.TrimSpace(downOutput) != "" {
-		logs = append(logs, downOutput)
+		for _, line := range strings.Split(downOutput, "\n") {
+			logs.Add(line)
+		}
 	}
 	if downErr != nil && ctx.Err() == nil {
-		logs = append(logs, downErr.Error())
+		logs.Add(downErr.Error())
 	}
 
-	_, upOutput, err := runCommand(
+	_, _, pullErr := runCommandStream(
 		ctx,
 		rootDir,
+		logs,
+		"docker",
+		"compose",
+		"-f",
+		composeFile,
+		"pull",
+		"--ignore-buildable",
+	)
+	if pullErr != nil {
+		return logs.Snapshot(), false, pullErr
+	}
+
+	_, _, buildErr := runCommandStream(
+		ctx,
+		rootDir,
+		logs,
+		"docker",
+		"compose",
+		"-f",
+		composeFile,
+		"build",
+		"--progress",
+		"plain",
+	)
+	if buildErr != nil {
+		return logs.Snapshot(), false, buildErr
+	}
+
+	_, _, err := runCommandStream(
+		ctx,
+		rootDir,
+		logs,
 		"docker",
 		"compose",
 		"-f",
 		composeFile,
 		"up",
 		"-d",
+		"--no-build",
 	)
-	if strings.TrimSpace(upOutput) != "" {
-		logs = append(logs, upOutput)
-	}
 	if err != nil {
-		return strings.Join(logs, "\n\n"), false, err
+		return logs.Snapshot(), false, err
 	}
 
-	return strings.Join(logs, "\n\n"), true, nil
+	return logs.Snapshot(), true, nil
 }
 
 func pollStack(ctx context.Context, rootDir string) (string, bool, bool, error) {
@@ -307,6 +375,73 @@ func runCommand(
 		)
 	}
 	return strings.Join(append([]string{name}, args...), " "), trimmed, nil
+}
+
+func runCommandStream(
+	ctx context.Context,
+	dir string,
+	logs *rollingLog,
+	name string,
+	args ...string,
+) (string, string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return strings.Join(append([]string{name}, args...), " "), "", fmt.Errorf(
+			"create stdout pipe: %w",
+			err,
+		)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return strings.Join(append([]string{name}, args...), " "), "", fmt.Errorf(
+			"create stderr pipe: %w",
+			err,
+		)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return strings.Join(append([]string{name}, args...), " "), "", fmt.Errorf(
+			"start %q: %w",
+			strings.Join(append([]string{name}, args...), " "),
+			err,
+		)
+	}
+
+	var wg sync.WaitGroup
+	stream := func(r *bufio.Reader) {
+		defer wg.Done()
+		for {
+			line, readErr := r.ReadString('\n')
+			if line != "" {
+				logs.Add(line)
+			}
+			if readErr != nil {
+				if strings.TrimSpace(line) != "" && readErr == io.EOF {
+					return
+				}
+				return
+			}
+		}
+	}
+
+	wg.Add(2)
+	go stream(bufio.NewReader(stdout))
+	go stream(bufio.NewReader(stderr))
+
+	err = cmd.Wait()
+	wg.Wait()
+	output := logs.Snapshot()
+	if err != nil {
+		return strings.Join(append([]string{name}, args...), " "), output, fmt.Errorf(
+			"run %q: %w",
+			strings.Join(append([]string{name}, args...), " "),
+			err,
+		)
+	}
+	return strings.Join(append([]string{name}, args...), " "), output, nil
 }
 
 func checkHTTPReady(ctx context.Context, target string) bool {
