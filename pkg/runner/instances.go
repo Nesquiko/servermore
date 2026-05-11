@@ -59,19 +59,24 @@ func (is *instanceState) ResetTimer() {
 	assert.That(resetted, "calling ResetTimer on already triggered timer")
 }
 
-func (is *instanceState) AddToQueue(req InvocationRequest) <-chan *InvocationResult {
+func (is *instanceState) AddToQueue(
+	ctx context.Context,
+	req InvocationRequest,
+) <-chan *InvocationResult {
 	assert.That(is.opened.Load(), "adding request to already closed queue")
 
 	resCh := make(chan *InvocationResult)
 	is.ResetTimer()
-	is.queue <- invocation{req: req, resCh: resCh}
+	is.queue <- invocation{ctx: ctx, req: req, resCh: resCh, enqueuedAt: time.Now()}
 
 	return resCh
 }
 
 type invocation struct {
-	req   InvocationRequest
-	resCh chan *InvocationResult
+	ctx        context.Context
+	req        InvocationRequest
+	resCh      chan *InvocationResult
+	enqueuedAt time.Time
 }
 
 type InvocationRequest struct {
@@ -82,8 +87,10 @@ type InvocationRequest struct {
 }
 
 type InvocationResult struct {
-	resp *runnergrpc.InvokeInstanceResponse
-	err  error
+	resp            *runnergrpc.InvokeInstanceResponse
+	err             error
+	queueWaitTook   time.Duration
+	guestInvokeTook time.Duration
 }
 
 func NewInstanceStates() *InstancesStates {
@@ -150,10 +157,12 @@ func (is *InstancesStates) Submit(
 	return &state
 }
 
-// QueueDepths reads the lengths of queues WITHOUGH LOCKING to not slowdown
-// the request processing, it is OK that it returns not precise data.
-// Filters out instances which will in end in the gracePeriod duration
+// QueueDepths reads the lengths of queues.
+// Filters out instances which will end within the gracePeriod duration.
 func (is *InstancesStates) QueueDepths(gracePeriod time.Duration) map[string]uint32 {
+	is.instanceStatesMu.RLock()
+	defer is.instanceStatesMu.RUnlock()
+
 	depths := make(map[string]uint32)
 	for id, instance := range is.instanceStates {
 		if time.Until(instance.lastUsedTimerEnd) < gracePeriod {
@@ -162,6 +171,13 @@ func (is *InstancesStates) QueueDepths(gracePeriod time.Duration) map[string]uin
 		depths[id.String()] = uint32(len(instance.queue))
 	}
 	return depths
+}
+
+func (is *InstancesStates) ActiveInstancesCount() int {
+	is.instanceStatesMu.RLock()
+	defer is.instanceStatesMu.RUnlock()
+
+	return len(is.instanceStates)
 }
 
 var ErrUnknownInstance = errors.New("unknown instance id")

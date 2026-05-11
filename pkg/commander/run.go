@@ -15,6 +15,7 @@ import (
 	api "github.com/Nesquiko/servermore/pkg/api/commander"
 	"github.com/Nesquiko/servermore/pkg/assert"
 	"github.com/Nesquiko/servermore/pkg/caching"
+	commandergrpc "github.com/Nesquiko/servermore/pkg/commander/grpc"
 	"github.com/Nesquiko/servermore/pkg/routing"
 	"github.com/Nesquiko/servermore/pkg/server"
 	"github.com/go-chi/chi/v5"
@@ -24,20 +25,21 @@ import (
 )
 
 type CommanderConfig struct {
-	AppName string
-	Env     string
+	AppName string             `yaml:"app_name"`
+	Env     server.Environment `yaml:"env"`
+	OTELOn  bool               `yaml:"otel_on"`
 
-	Host     string
-	HttpPort string
-	GrpcPort string
+	Host     string `yaml:"host"`
+	HttpPort string `yaml:"http_port"`
+	GrpcPort string `yaml:"grpc_port"`
 
-	DbURI           string
-	FuncStorageRoot AbsolutePath
+	DbURI           string       `yaml:"db_uri"`
+	FuncStorageRoot AbsolutePath `yaml:"func_storage_root"`
 
-	RunnerHeartbeatPoll time.Duration
+	RunnerHeartbeatPoll time.Duration `yaml:"runner_heartbeat_poll"`
 
-	RunnerOverloadedQueueSize   int
-	InstanceOverloadedQueueSize int
+	RunnerOverloadedQueueSize   int `yaml:"runner_overloaded_queue_size"`
+	InstanceOverloadedQueueSize int `yaml:"instance_overloaded_queue_size"`
 }
 
 func (c CommanderConfig) GrpcAddr() string {
@@ -51,7 +53,9 @@ func Run(ctx context.Context, cache caching.RoutingCache, conf CommanderConfig) 
 	monitoringOpts := server.MonitoringOpts{
 		Env:     conf.Env,
 		AppName: conf.AppName,
+		OTELOn:  conf.OTELOn,
 	}
+	server.SetDefaultLogger(monitoringOpts)
 
 	otelCfg, otelShutdown, err := server.InitHttpOTEL(ctx, monitoringOpts)
 	if err != nil {
@@ -73,13 +77,17 @@ func Run(ctx context.Context, cache caching.RoutingCache, conf CommanderConfig) 
 		conf.InstanceOverloadedQueueSize,
 		conf.RunnerOverloadedQueueSize,
 	)
-	svc := NewCommanderService(
+	svc, err := NewCommanderService(
 		db,
 		funcStorage,
 		cache,
 		router,
-		CommanderServiceConfig{RunnerClientOpts: server.MonitoringOpts{Env: conf.Env}},
+		CommanderServiceConfig{RunnerClientOpts: server.MonitoringOpts{Env: conf.Env, AppName: conf.AppName, OTELOn: conf.OTELOn}},
 	)
+	if err != nil {
+		return fmt.Errorf("failed to initialize commander service: %w", err)
+	}
+	defer svc.Close()
 	runnerHeartbeatPolling(ctx, conf, svc)
 
 	httpCloser, httpErrCh, err := runHttp(conf, svc, otelCfg, monitoringOpts)
@@ -178,8 +186,12 @@ func runGrpc(
 	}
 	// lis.Close by the grpcServer
 
-	grpcServer := server.InstrumentedGrpcServer(monitoringOpts, server.WithRegisterRunnerMetaHolder)
-	RegisterCommanderServer(grpcServer, commanderGrpc)
+	grpcServer := server.InstrumentedGrpcServer(
+		monitoringOpts,
+		server.WithRegisterRunnerMetaHolder,
+		server.WithRouteFunctionMetaHolder,
+	)
+	commandergrpc.RegisterCommanderServer(grpcServer, commanderGrpc)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -203,7 +215,12 @@ func createMiddleware(
 	otelCfg otelchimetric.BaseConfig,
 	loggingOpts server.MonitoringOpts,
 ) []api.MiddlewareFunc {
-	ms := server.HttpMiddleware(otelCfg, loggingOpts)
+	ms := server.HttpMiddleware(
+		otelCfg,
+		loggingOpts,
+		server.WithCreateFunctionMetaHolder,
+		server.WithDownloadFunctionBinaryMetaHolder,
+	)
 	out := make([]api.MiddlewareFunc, len(ms))
 	for i, m := range ms {
 		out[i] = api.MiddlewareFunc(m)

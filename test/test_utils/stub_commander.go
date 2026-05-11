@@ -14,6 +14,7 @@ import (
 	api "github.com/Nesquiko/servermore/pkg/api/commander"
 	"github.com/Nesquiko/servermore/pkg/assert"
 	"github.com/Nesquiko/servermore/pkg/commander"
+	commandergrpc "github.com/Nesquiko/servermore/pkg/commander/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -22,7 +23,7 @@ import (
 )
 
 type StubCommander struct {
-	commander.UnimplementedCommanderServer
+	commandergrpc.UnimplementedCommanderServer
 
 	storageRoot string
 	host        string
@@ -35,8 +36,10 @@ type StubCommander struct {
 	errorOnPaths   map[server.AbsolutePath]error
 	errorOnPathsMu sync.RWMutex
 
-	FixedRunnerAddr string
-	FixedInstanceID string
+	routeMu         sync.RWMutex
+	routeRunnerAddr string
+	routeInstanceID string
+	routeErr        error
 }
 
 func RunStubCommander(ctx context.Context) *StubCommander {
@@ -57,10 +60,13 @@ func runGrpcStub(ctx context.Context) *StubCommander {
 	assert.NoError(err)
 
 	stub := &StubCommander{
-		storageRoot:    tmpDir,
-		host:           "127.0.0.1",
-		grpcPort:       port,
-		grpcServer:     grpc.NewServer(),
+		storageRoot: tmpDir,
+		host:        "127.0.0.1",
+		grpcPort:    port,
+		grpcServer: grpc.NewServer(
+			grpc.MaxRecvMsgSize(int(server.GrpcMaxBytes)),
+			grpc.MaxSendMsgSize(int(server.GrpcMaxBytes)),
+		),
 		errorOnPaths:   map[server.AbsolutePath]error{},
 		errorOnPathsMu: sync.RWMutex{},
 	}
@@ -68,7 +74,7 @@ func runGrpcStub(ctx context.Context) *StubCommander {
 
 	listener, err := net.Listen("tcp", stub.GrpcAddr())
 	assert.NoError(err)
-	commander.RegisterCommanderServer(stub.grpcServer, stub)
+	commandergrpc.RegisterCommanderServer(stub.grpcServer, stub)
 
 	go func() {
 		err := stub.grpcServer.Serve(listener)
@@ -89,7 +95,12 @@ func runHttpStub(ctx context.Context, stub *StubCommander, opts server.Monitorin
 
 	r := chi.NewMux()
 	r.Use(middleware.Heartbeat(server.HeartbeatEndpoint))
-	r.Use(server.HttpMiddleware(metric.BaseConfig{}, opts)...)
+	r.Use(server.HttpMiddleware(
+		metric.BaseConfig{},
+		opts,
+		server.WithCreateFunctionMetaHolder,
+		server.WithDownloadFunctionBinaryMetaHolder,
+	)...)
 
 	h := api.HandlerFromMux(stub, r)
 	h = server.WithAPIErrorHolder(h)
@@ -171,27 +182,59 @@ func (s *StubCommander) DeleteFile(filename string) {
 
 func (s *StubCommander) Heartbeat(
 	context.Context,
-	*commander.HeartbeatRequest,
-) (*commander.HeartbeatResponse, error) {
-	return &commander.HeartbeatResponse{}, nil
+	*commandergrpc.HeartbeatRequest,
+) (*commandergrpc.HeartbeatResponse, error) {
+	return &commandergrpc.HeartbeatResponse{}, nil
 }
 
 func (s *StubCommander) RegisterRunner(
 	context.Context,
-	*commander.RegisterRunnerRequest,
-) (*commander.RegisterRunnerResponse, error) {
+	*commandergrpc.RegisterRunnerRequest,
+) (*commandergrpc.RegisterRunnerResponse, error) {
 	id := s.runnerID.Add(1)
-	return &commander.RegisterRunnerResponse{RunnerId: id}, nil
+	return &commandergrpc.RegisterRunnerResponse{RunnerId: id}, nil
 }
 
 func (s *StubCommander) RouteFunction(
-	ctx context.Context,
-	req *commander.RouteFunctionRequest,
-) (*commander.RouteFunctionResponse, error) {
-	return &commander.RouteFunctionResponse{
-		RunnerAddr: s.FixedRunnerAddr,
-		InstanceId: s.FixedInstanceID,
+	context.Context,
+	*commandergrpc.RouteFunctionRequest,
+) (*commandergrpc.RouteFunctionResponse, error) {
+	s.routeMu.RLock()
+	runnerAddr := s.routeRunnerAddr
+	instanceID := s.routeInstanceID
+	routeErr := s.routeErr
+	s.routeMu.RUnlock()
+
+	if routeErr != nil {
+		return nil, routeErr
+	}
+
+	return &commandergrpc.RouteFunctionResponse{
+		RunnerAddr: runnerAddr,
+		InstanceId: instanceID,
 	}, nil
+}
+
+func (s *StubCommander) SetRouteResponse(runnerAddr string, instanceID string) {
+	s.routeMu.Lock()
+	s.routeRunnerAddr = runnerAddr
+	s.routeInstanceID = instanceID
+	s.routeErr = nil
+	s.routeMu.Unlock()
+}
+
+func (s *StubCommander) SetRouteError(err error) {
+	s.routeMu.Lock()
+	s.routeErr = err
+	s.routeMu.Unlock()
+}
+
+func (s *StubCommander) ClearRouteConfig() {
+	s.routeMu.Lock()
+	s.routeRunnerAddr = ""
+	s.routeInstanceID = ""
+	s.routeErr = nil
+	s.routeMu.Unlock()
 }
 
 // CreateFunction implements [api.ServerInterface].

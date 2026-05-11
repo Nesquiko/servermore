@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/Nesquiko/servermore/pkg/commander"
+	commandergrpc "github.com/Nesquiko/servermore/pkg/commander/grpc"
 	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	testutils "github.com/Nesquiko/servermore/test/test_utils"
 	"github.com/stretchr/testify/assert"
@@ -31,7 +31,7 @@ func TestRouteFunction_PreparesThenReusesExistingInstance(t *testing.T) {
 		client := newCommanderClient(t)
 		routingResp, err := client.RouteFunction(
 			ctx,
-			&commander.RouteFunctionRequest{FunctionId: "missing-function-for-unavailable"},
+			&commandergrpc.RouteFunctionRequest{FunctionId: "missing-function-for-unavailable"},
 		)
 		require.Error(t, err)
 		assert.Nil(t, routingResp)
@@ -60,7 +60,7 @@ func TestRouteFunction_PreparesThenReusesExistingInstance(t *testing.T) {
 		client := newCommanderClient(t)
 		routingResp, err := client.RouteFunction(
 			ctx,
-			&commander.RouteFunctionRequest{FunctionId: strconv.FormatInt(created.Id, 10)},
+			&commandergrpc.RouteFunctionRequest{FunctionId: strconv.FormatInt(created.Id, 10)},
 		)
 		require.NoError(t, err)
 		assert.Equal(t, stubRunner.GrpcAddr(), routingResp.GetRunnerAddr())
@@ -69,21 +69,17 @@ func TestRouteFunction_PreparesThenReusesExistingInstance(t *testing.T) {
 	})
 
 	t.Run("reuses existing instance", func(t *testing.T) {
-		require.NoError(t, TestCache.SetInstance(
-			ctx,
-			strconv.FormatInt(created.Id, 10),
-			"reused-inst-1",
-			stubRunner.GrpcAddr(),
-			0,
-		))
+		instances, err := TestCache.FunctionIdInstances(ctx, strconv.FormatInt(created.Id, 10))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"prepared-inst-1": 0}, instances)
 
 		client := newCommanderClient(t)
-		routingResp, err := client.RouteFunction(ctx, &commander.RouteFunctionRequest{
+		routingResp, err := client.RouteFunction(ctx, &commandergrpc.RouteFunctionRequest{
 			FunctionId: strconv.FormatInt(created.Id, 10),
 		})
 		require.NoError(t, err)
 		assert.Equal(t, stubRunner.GrpcAddr(), routingResp.GetRunnerAddr())
-		assert.Equal(t, "reused-inst-1", routingResp.GetInstanceId())
+		assert.Equal(t, "prepared-inst-1", routingResp.GetInstanceId())
 		assert.EqualValues(t, 1, stubRunner.PrepareCallsCount())
 	})
 
@@ -109,7 +105,7 @@ func TestRouteFunction_PreparesThenReusesExistingInstance(t *testing.T) {
 		)
 
 		client := newCommanderClient(t)
-		routingResp, err := client.RouteFunction(ctx, &commander.RouteFunctionRequest{
+		routingResp, err := client.RouteFunction(ctx, &commandergrpc.RouteFunctionRequest{
 			FunctionId: strconv.FormatInt(leastLoadedFunction.Id, 10),
 		})
 		require.NoError(t, err)
@@ -135,7 +131,7 @@ func TestRouteFunction_ReturnsNotFoundWhenFunctionMissing(t *testing.T) {
 	client := newCommanderClient(t)
 	routingResp, err := client.RouteFunction(
 		ctx,
-		&commander.RouteFunctionRequest{FunctionId: strconv.FormatInt(999999999999, 10)},
+		&commandergrpc.RouteFunctionRequest{FunctionId: strconv.FormatInt(999999999999, 10)},
 	)
 	require.Error(t, err)
 	assert.Nil(t, routingResp)

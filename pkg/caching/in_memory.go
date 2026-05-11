@@ -207,6 +207,14 @@ func (c *InMemoryCache) StatsPerRunner(_ context.Context) (map[string]ResourceMe
 	return result, nil
 }
 
+// CachedInstancesCount implements [RoutingCache].
+func (c *InMemoryCache) CachedInstancesCount(_ context.Context) (int, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return len(c.instanceRunner), nil
+}
+
 // UpdateInstanceQueueLen updates the request queue length for a specific instance.
 func (c *InMemoryCache) UpdateInstanceQueueLen(funcId, instanceId string, queueLen int) {
 	c.mu.Lock()

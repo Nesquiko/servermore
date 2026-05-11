@@ -11,6 +11,9 @@ import (
 
 const MaxBytes = 64 * 1024 * 1024 // 64MB
 
+// gRPC messages include protobuf framing and request metadata, so allow a small buffer.
+const GrpcMaxBytes int = MaxBytes + 1<<20 // +1 MB
+
 func Decode[T any](w http.ResponseWriter, r *http.Request) (T, Error) {
 	dst, err := decode[T](w, r)
 	if err != nil {

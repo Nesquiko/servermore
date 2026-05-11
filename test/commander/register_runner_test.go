@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Nesquiko/servermore/pkg/commander"
+	commandergrpc "github.com/Nesquiko/servermore/pkg/commander/grpc"
 	testutils "github.com/Nesquiko/servermore/test/test_utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,9 +23,12 @@ func TestRegisterRunner_PersistsNewRunnerAfterSuccessfulHeartbeat(t *testing.T) 
 	var runnerId *int64
 
 	t.Run("persists new runner", func(t *testing.T) {
-		registerResp, err := client.RegisterRunner(t.Context(), &commander.RegisterRunnerRequest{
-			Addr: stubRunner.GrpcAddr(),
-		})
+		registerResp, err := client.RegisterRunner(
+			t.Context(),
+			&commandergrpc.RegisterRunnerRequest{
+				Addr: stubRunner.GrpcAddr(),
+			},
+		)
 		require.NoError(t, err)
 		assert.NotZero(t, registerResp.GetRunnerId())
 		runnerId = new(registerResp.GetRunnerId())
@@ -37,9 +40,12 @@ func TestRegisterRunner_PersistsNewRunnerAfterSuccessfulHeartbeat(t *testing.T) 
 	})
 
 	t.Run("returns existing runner for known address", func(t *testing.T) {
-		registerResp, err := client.RegisterRunner(t.Context(), &commander.RegisterRunnerRequest{
-			Addr: stubRunner.GrpcAddr(),
-		})
+		registerResp, err := client.RegisterRunner(
+			t.Context(),
+			&commandergrpc.RegisterRunnerRequest{
+				Addr: stubRunner.GrpcAddr(),
+			},
+		)
 		require.NoError(t, err)
 		require.NotNil(t, runnerId)
 		assert.Equal(t, *runnerId, registerResp.GetRunnerId())
@@ -58,7 +64,7 @@ func TestRegisterRunner_FailsWhenRunnerHeartbeatFails(t *testing.T) {
 	require.NoError(t, err)
 	runnerAddr := "127.0.0.1:" + port
 
-	registerResp, err := client.RegisterRunner(t.Context(), &commander.RegisterRunnerRequest{
+	registerResp, err := client.RegisterRunner(t.Context(), &commandergrpc.RegisterRunnerRequest{
 		Addr: runnerAddr,
 	})
 	require.Error(t, err)
@@ -80,13 +86,13 @@ func TestRegisterRunner_DifferentAddressesCreateDistinctRunners(t *testing.T) {
 		stubRunner2.Close()
 	})
 
-	registerResp1, err := client.RegisterRunner(t.Context(), &commander.RegisterRunnerRequest{
+	registerResp1, err := client.RegisterRunner(t.Context(), &commandergrpc.RegisterRunnerRequest{
 		Addr: stubRunner1.GrpcAddr(),
 	})
 	require.NoError(t, err)
 	assert.NotZero(t, registerResp1.GetRunnerId())
 
-	registerResp2, err := client.RegisterRunner(t.Context(), &commander.RegisterRunnerRequest{
+	registerResp2, err := client.RegisterRunner(t.Context(), &commandergrpc.RegisterRunnerRequest{
 		Addr: stubRunner2.GrpcAddr(),
 	})
 	require.NoError(t, err)
@@ -116,7 +122,7 @@ func TestRegisterRunner_ConcurrentCallsForSameAddressReturnOneRunner(t *testing.
 
 	const requestsCount = 10
 
-	responses := make([]*commander.RegisterRunnerResponse, requestsCount)
+	responses := make([]*commandergrpc.RegisterRunnerResponse, requestsCount)
 	errs := make([]error, requestsCount)
 
 	var wg sync.WaitGroup
@@ -126,7 +132,7 @@ func TestRegisterRunner_ConcurrentCallsForSameAddressReturnOneRunner(t *testing.
 			defer wg.Done()
 			responses[i], errs[i] = client.RegisterRunner(
 				t.Context(),
-				&commander.RegisterRunnerRequest{
+				&commandergrpc.RegisterRunnerRequest{
 					Addr: stubRunner.GrpcAddr(),
 				},
 			)
@@ -168,7 +174,7 @@ func TestRegisterRunner_ReRegistrationAfterInitialFailureSucceeds(t *testing.T) 
 	require.NoError(t, err)
 	runnerAddr := "127.0.0.1:" + port
 
-	registerResp, err := client.RegisterRunner(t.Context(), &commander.RegisterRunnerRequest{
+	registerResp, err := client.RegisterRunner(t.Context(), &commandergrpc.RegisterRunnerRequest{
 		Addr: runnerAddr,
 	})
 	require.Error(t, err)
@@ -183,7 +189,7 @@ func TestRegisterRunner_ReRegistrationAfterInitialFailureSucceeds(t *testing.T) 
 		stubRunner.Close()
 	})
 
-	registerResp, err = client.RegisterRunner(t.Context(), &commander.RegisterRunnerRequest{
+	registerResp, err = client.RegisterRunner(t.Context(), &commandergrpc.RegisterRunnerRequest{
 		Addr: runnerAddr,
 	})
 	require.NoError(t, err)

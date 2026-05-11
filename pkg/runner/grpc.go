@@ -15,6 +15,7 @@ import (
 	commanderclient "github.com/Nesquiko/servermore/pkg/api/commander-client"
 	"github.com/Nesquiko/servermore/pkg/assert"
 	"github.com/Nesquiko/servermore/pkg/commander"
+	commandergrpc "github.com/Nesquiko/servermore/pkg/commander/grpc"
 	"github.com/Nesquiko/servermore/pkg/guest"
 	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
 	"github.com/Nesquiko/servermore/pkg/server"
@@ -25,7 +26,7 @@ type runnerGrpcServer struct {
 	runnergrpc.UnimplementedRunnerServer
 
 	runnerId            int64
-	commanderGrpcClient commander.CommanderClient
+	commanderGrpcClient commandergrpc.CommanderClient
 	commanderHttpClient *commanderclient.Client
 
 	instances *InstancesStates
@@ -36,14 +37,14 @@ type runnerGrpcServer struct {
 	instanceShutdownAfter time.Duration
 	instanceGracePeriod   time.Duration
 
-	monitoringOpts   server.MonitoringOpts
-	metricsCollector *MetricsCollector
+	monitoringOpts server.MonitoringOpts
+	systemMetrics  *SystemMetricsCollector
+	metrics        *RunnerMetrics
 }
 
 var _ runnergrpc.RunnerServer = (*runnerGrpcServer)(nil)
 
 func newRunnerGrpcServer(
-	ctx context.Context,
 	conf RunnerConfig,
 	monitoringOpts server.MonitoringOpts,
 ) (*runnerGrpcServer, func(), error) {
@@ -57,7 +58,10 @@ func newRunnerGrpcServer(
 	}
 
 	commanderHttpAddr := fmt.Sprintf("http://%s:%s", conf.CommanderHost, conf.CommanderHttpPort)
-	httpClient, err := commanderclient.NewClient(commanderHttpAddr)
+	httpClient, err := commanderclient.NewClient(
+		commanderHttpAddr,
+		commanderclient.WithRequestEditorFn(server.InjectTraceContext),
+	)
 	if err != nil {
 		slog.Error(
 			"failed to initialize http commander client",
@@ -81,27 +85,45 @@ func newRunnerGrpcServer(
 		server.Close(conn)
 	}
 
-	client := commander.NewCommanderClient(conn)
-
-	resp, err := client.RegisterRunner(ctx, &commander.RegisterRunnerRequest{Addr: conf.Addr})
+	instances := NewInstanceStates()
+	runnerMetrics, err := NewRunnerMetrics(instances)
 	if err != nil {
-		closer()
-		return nil, nil, fmt.Errorf("registration with commander failed: %w", err)
+		return nil, nil, fmt.Errorf("failed to initialize runner metrics: %w", err)
 	}
-	slog.Info("registration with commander successful", "runner.id", resp.RunnerId)
 
 	return &runnerGrpcServer{
-		runnerId:              resp.RunnerId,
-		commanderGrpcClient:   client,
+		commanderGrpcClient:   commandergrpc.NewCommanderClient(conn),
 		commanderHttpClient:   httpClient,
-		instances:             NewInstanceStates(),
+		instances:             instances,
 		downloads:             NewDownloadsSyncMap(),
 		instanceShutdownAfter: conf.InstanceShutdownAfter,
 		instanceGracePeriod:   conf.InstanceGracePeriod,
 		monitoringOpts:        monitoringOpts,
 		downloadsStorageRoot:  conf.FuncStorageRoot,
-		metricsCollector:      NewMetricsCollector(),
+		systemMetrics:         NewSystemMetricsCollector(),
+		metrics:               runnerMetrics,
 	}, closer, nil
+}
+
+func (r *runnerGrpcServer) Close() {
+	if r == nil || r.metrics == nil {
+		return
+	}
+	r.metrics.Close()
+}
+
+func (r *runnerGrpcServer) registerWithCommander(ctx context.Context, addr string) error {
+	resp, err := r.commanderGrpcClient.RegisterRunner(
+		ctx,
+		&commandergrpc.RegisterRunnerRequest{Addr: addr},
+	)
+	if err != nil {
+		return fmt.Errorf("registration with commander failed: %w", err)
+	}
+
+	r.runnerId = resp.RunnerId
+	slog.Info("registration with commander successful", "runner.id", resp.RunnerId)
+	return nil
 }
 
 // Heartbeat implements [RunnerServer].
@@ -110,7 +132,7 @@ func (r *runnerGrpcServer) Heartbeat(
 	*runnergrpc.HeartbeatRequest,
 ) (*runnergrpc.HeartbeatResponse, error) {
 	depths := r.instances.QueueDepths(r.instanceGracePeriod)
-	metrics, err := r.metricsCollector.Collect()
+	metrics, err := r.systemMetrics.Collect()
 	if err != nil {
 		return nil, fmt.Errorf("failed to collect metrics: %w", err)
 	}
@@ -126,6 +148,13 @@ func (r *runnerGrpcServer) PrepareFunctionInstance(
 	ctx context.Context,
 	req *runnergrpc.PrepareInstanceRequest,
 ) (*runnergrpc.PrepareInstanceResponse, error) {
+	startInstance := func(funcFilePath server.AbsolutePath) (uuid.UUID, error) {
+		startStartedAt := time.Now()
+		instanceId, err := r.startInstance(ctx, funcFilePath)
+		r.metrics.RecordPrepareStart(ctx, time.Since(startStartedAt))
+		return instanceId, err
+	}
+
 	funcPath := r.pathOnRunner(req.FunctionPath)
 	meta := &server.DownloadMeta{FunctionID: req.FunctionId, DownloadPath: req.FunctionPath}
 	server.SetDownloadMeta(ctx, meta)
@@ -138,7 +167,7 @@ func (r *runnerGrpcServer) PrepareFunctionInstance(
 	if exists {
 		meta.ReusedFromFS = true
 		meta.StoredPath = funcPath
-		instanceId, err := r.startInstance(ctx, funcPath)
+		instanceId, err := startInstance(funcPath)
 		if err != nil {
 			return nil, fmt.Errorf("starting instance failed: %w", err)
 		}
@@ -161,7 +190,7 @@ func (r *runnerGrpcServer) PrepareFunctionInstance(
 			}
 			meta.StoredPath = downloadResult.path
 
-			instanceId, err := r.startInstance(ctx, downloadResult.path)
+			instanceId, err := startInstance(downloadResult.path)
 			if err != nil {
 				return nil, fmt.Errorf("starting instance downloaded by other failed: %w", err)
 			}
@@ -178,12 +207,13 @@ func (r *runnerGrpcServer) PrepareFunctionInstance(
 	if err != nil {
 		return nil, fmt.Errorf("download errored: %w", err)
 	}
+	r.metrics.RecordPrepareDownload(ctx, downloadTook)
 	meta.Downloaded = true
 	meta.StoredPath = funcFilePath
 	meta.BytesWritten = bytesWritten
 	meta.DownloadTook = downloadTook
 
-	instanceId, err := r.startInstance(ctx, funcFilePath)
+	instanceId, err := startInstance(funcFilePath)
 	if err != nil {
 		return nil, fmt.Errorf("starting downloaded instance failed: %w", err)
 	}
@@ -197,6 +227,7 @@ func (r *runnerGrpcServer) startInstance(
 	ctx context.Context,
 	funcFilePath server.AbsolutePath,
 ) (uuid.UUID, error) {
+	startStartedAt := time.Now()
 	instanceId, err := uuid.NewV7()
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("failed to construct uuid v7: %w", err)
@@ -218,6 +249,7 @@ func (r *runnerGrpcServer) startInstance(
 
 		meta.InstanceID = idResult.instanceId.String()
 		meta.ReusedAssigned = true
+		meta.StartTook = time.Since(startStartedAt)
 		return idResult.instanceId, nil
 	}
 
@@ -228,12 +260,14 @@ func (r *runnerGrpcServer) startInstance(
 	if err != nil {
 		r.instances.RemoveStartingInstance(funcFilePath)
 		idConsumers.SubmitResult(StartInstanceResult{err: err})
+		meta.StartTook = time.Since(startStartedAt)
 		return uuid.Nil, fmt.Errorf("failed to start the instance: %w", err)
 	}
 	instance := r.instances.Submit(funcFilePath, instanceId, r.instanceShutdownAfter, funcRuntime)
 	go r.shutdownAfterTime(instance)
 
 	idConsumers.SubmitResult(StartInstanceResult{instanceId: instanceId})
+	meta.StartTook = time.Since(startStartedAt)
 
 	return instanceId, nil
 }
@@ -249,6 +283,7 @@ func (r *runnerGrpcServer) InvokeFunctionInstance(
 	req *runnergrpc.InvokeInstanceRequest,
 ) (*runnergrpc.InvokeInstanceResponse, error) {
 	startTime := time.Now()
+
 	meta := &server.InvokeMeta{
 		InstanceID:       req.InstanceId,
 		Method:           req.Method,
@@ -279,7 +314,7 @@ func (r *runnerGrpcServer) InvokeFunctionInstance(
 	meta.WorkerAlreadyRunning = isRunning
 	meta.StartedWorker = !isRunning
 	meta.FunctionPath = instance.funcPath
-	respCh := instance.AddToQueue(invocationReq)
+	respCh := instance.AddToQueue(ctx, invocationReq)
 	meta.QueueDepthAtEnqueue = len(instance.queue)
 
 	if !isRunning {
@@ -292,6 +327,8 @@ func (r *runnerGrpcServer) InvokeFunctionInstance(
 		return nil, ctx.Err()
 	case result := <-respCh:
 		meta.InvocationTook = time.Since(startTime)
+		meta.QueueWaitTook = result.queueWaitTook
+		meta.GuestInvokeTook = result.guestInvokeTook
 		if result.err != nil {
 			return result.resp, result.err
 		}
@@ -324,11 +361,20 @@ outer:
 				break outer
 			}
 
-			resp, err := instance.runtime.Invoke(instance.workerCtx, &guest.InvocationRequest{Method: req.req.Method, Path: req.req.Path, Headers: req.req.Headers, Body: req.req.Body})
+			queueWaitTook := time.Since(req.enqueuedAt)
+			guestStart := time.Now()
+			invokeCtx, invokeCancel := context.WithCancel(req.ctx)
+			stopCancel := context.AfterFunc(instance.workerCtx, invokeCancel)
+			resp, err := instance.runtime.Invoke(invokeCtx, &guest.InvocationRequest{Method: req.req.Method, Path: req.req.Path, Headers: req.req.Headers, Body: req.req.Body})
+			stopCancel()
+			invokeCancel()
+			guestInvokeTook := time.Since(guestStart)
+			r.metrics.RecordInvokeQueueWait(req.ctx, queueWaitTook)
+			r.metrics.RecordInvokeGuestDuration(req.ctx, guestInvokeTook)
 			if err != nil {
-				req.resCh <- &InvocationResult{err: err}
+				req.resCh <- &InvocationResult{err: err, queueWaitTook: queueWaitTook, guestInvokeTook: guestInvokeTook}
 			} else {
-				req.resCh <- &InvocationResult{resp: &runnergrpc.InvokeInstanceResponse{StatusCode: resp.StatusCode, Headers: resp.Headers, Body: resp.Body}}
+				req.resCh <- &InvocationResult{resp: &runnergrpc.InvokeInstanceResponse{StatusCode: resp.StatusCode, Headers: resp.Headers, Body: resp.Body}, queueWaitTook: queueWaitTook, guestInvokeTook: guestInvokeTook}
 			}
 
 			if !timer.Reset(WorkerIdleTimeout) {
@@ -361,6 +407,10 @@ func (r *runnerGrpcServer) downloadFunction(
 
 	responseFuncPath := resp.Header.Get(commander.DownloadHeaderFunctionPath)
 	responseFuncName := resp.Header.Get(commander.DownloadHeaderFunctionFilename)
+	meta := server.GetDownloadMeta(ctx)
+	assert.That(meta != nil, "meta was nil")
+	meta.SourcePath = responseFuncPath
+	meta.SourceFilename = responseFuncName
 
 	funcPath := r.pathOnRunner(filepath.Join(responseFuncPath, responseFuncName))
 	funcDir := filepath.Dir(funcPath)

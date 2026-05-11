@@ -6,7 +6,9 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/riandyrn/otelchi"
 	otelchimetric "github.com/riandyrn/otelchi/metric"
+	"go.opentelemetry.io/otel"
 )
 
 const HeartbeatEndpoint = "/monitoring/heartbeat"
@@ -14,12 +16,20 @@ const HeartbeatEndpoint = "/monitoring/heartbeat"
 func HttpMiddleware(
 	otelCfg otelchimetric.BaseConfig,
 	loggingOpts MonitoringOpts,
+	contextMiddlewares ...func(http.Handler) http.Handler,
 ) []func(http.Handler) http.Handler {
+	serverName := loggingOpts.AppName
+
 	ms := []func(http.Handler) http.Handler{
+		otelchi.Middleware(
+			serverName,
+			otelchi.WithTracerProvider(otel.GetTracerProvider()),
+			otelchi.WithPropagators(otel.GetTextMapPropagator()),
+		),
 		WithAPIErrorHolder,
-		CreateHTTPLogger(loggingOpts),
-		middleware.Recoverer,
 	}
+	ms = append(ms, contextMiddlewares...)
+	ms = append(ms, CreateHTTPLogger(loggingOpts), middleware.Recoverer)
 
 	if loggingOpts.OTELOn {
 		ms = append(ms,

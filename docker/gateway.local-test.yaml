@@ -1,0 +1,13 @@
+app_name: gateway
+env: PROD
+otel_on: true
+address: 0.0.0.0:8080
+commander_addr: commander:42070
+commander_client_monitoring_opts:
+  env: PROD
+  app_name: gateway
+  otel_on: true
+runner_client_monitoring_opts:
+  env: PROD
+  app_name: gateway
+  otel_on: true

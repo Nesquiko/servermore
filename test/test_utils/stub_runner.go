@@ -11,6 +11,7 @@ import (
 
 	"github.com/Nesquiko/servermore/pkg/assert"
 	runnergrpc "github.com/Nesquiko/servermore/pkg/runner/grpc"
+	"github.com/Nesquiko/servermore/pkg/server"
 	grpc "google.golang.org/grpc"
 )
 
@@ -80,10 +81,13 @@ func runStubRunnerOnPort(ctx context.Context, port string) *StubRunner {
 	assert.That(port != "", "stub runner port must not be empty")
 
 	stub := &StubRunner{
-		host:       "127.0.0.1",
-		port:       port,
-		grpcServer: grpc.NewServer(),
-		mu:         sync.RWMutex{},
+		host: "127.0.0.1",
+		port: port,
+		grpcServer: grpc.NewServer(
+			grpc.MaxRecvMsgSize(server.GrpcMaxBytes),
+			grpc.MaxSendMsgSize(server.GrpcMaxBytes),
+		),
+		mu: sync.RWMutex{},
 	}
 
 	listener, err := net.Listen("tcp", stub.GrpcAddr())

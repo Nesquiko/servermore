@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/Nesquiko/servermore/pkg/server"
 	"google.golang.org/grpc"
@@ -45,7 +46,7 @@ func start(f FunctionHandler, sdkLogger *slog.Logger) error {
 	monitoringOpts := server.MonitoringOpts{
 		AppName:    "guest-sdk",
 		AppVersion: "n/a",
-		Env:        "LOCAL",
+		Env:        server.PROD,
 	}
 
 	if addr == "" {
@@ -58,7 +59,7 @@ func start(f FunctionHandler, sdkLogger *slog.Logger) error {
 	}
 	// lis.Close by the grpcServer
 
-	grpcServer := server.InstrumentedGrpcServer(monitoringOpts)
+	grpcServer := server.InstrumentedGrpcServer(monitoringOpts, server.WithGuestInvokeMetaHolder)
 	RegisterGuestServer(grpcServer, &guestServer{f: f})
 
 	errCh := make(chan error, 1)
@@ -107,15 +108,32 @@ func (g *guestServer) InvokeFunction(
 	ctx context.Context,
 	req *InvocationRequest,
 ) (*InvocationResponse, error) {
+	startedAt := time.Now()
+	meta := &server.GuestInvokeMeta{}
+	server.SetGuestInvokeMeta(ctx, meta)
+
+	defer func() {
+		meta.InvocationTook = time.Since(startedAt)
+	}()
+
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "request is required")
 	}
 
+	meta.Method = req.Method
+	meta.Path = req.Path
+	meta.RequestBodyBytes = len(req.Body)
+	meta.HeadersCount = len(req.Headers)
+
 	resp, err := g.f(ctx, req)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
-	} else if resp == nil {
+	}
+	if resp == nil {
 		return nil, status.Error(codes.Internal, NilResponseErrorMsg)
 	}
+
+	meta.ResponseStatusCode = int(resp.StatusCode)
+	meta.ResponseBodyBytes = len(resp.Body)
 	return resp, nil
 }

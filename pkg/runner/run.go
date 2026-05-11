@@ -16,19 +16,20 @@ import (
 )
 
 type RunnerConfig struct {
-	AppName    string
-	CommitHash string
-	Env        string
+	AppName    string             `yaml:"app_name"`
+	CommitHash string             `yaml:"commit_hash"`
+	Env        server.Environment `yaml:"env"`
+	OTELOn     bool               `yaml:"otel_on"`
 
-	Addr string
+	Addr string `yaml:"addr"`
 
-	CommanderHost     string
-	CommanderHttpPort string
-	CommanderGrpcPort string
+	CommanderHost     string `yaml:"commander_host"`
+	CommanderHttpPort string `yaml:"commander_http_port"`
+	CommanderGrpcPort string `yaml:"commander_grpc_port"`
 
-	InstanceShutdownAfter time.Duration
-	InstanceGracePeriod   time.Duration
-	FuncStorageRoot       string
+	InstanceShutdownAfter time.Duration `yaml:"instance_shutdown_after"`
+	InstanceGracePeriod   time.Duration `yaml:"instance_grace_period"`
+	FuncStorageRoot       string        `yaml:"func_storage_root"`
 }
 
 func Run(ctx context.Context, conf RunnerConfig) error {
@@ -39,7 +40,9 @@ func Run(ctx context.Context, conf RunnerConfig) error {
 		Env:        conf.Env,
 		AppName:    conf.AppName,
 		AppVersion: conf.CommitHash,
+		OTELOn:     conf.OTELOn,
 	}
+	server.SetDefaultLogger(monitoringOpts)
 
 	_, otelShutdown, err := server.InitOTEL(ctx, monitoringOpts)
 	if err != nil {
@@ -47,10 +50,11 @@ func Run(ctx context.Context, conf RunnerConfig) error {
 		return fmt.Errorf("OTEL initialization failed: %w", err)
 	}
 
-	runnerServer, runnerCloser, err := newRunnerGrpcServer(ctx, conf, monitoringOpts)
+	runnerServer, runnerCloser, err := newRunnerGrpcServer(conf, monitoringOpts)
 	if err != nil {
 		return fmt.Errorf("failed to initialize runner: %w", err)
 	}
+	defer runnerServer.Close()
 
 	lis, err := net.Listen("tcp", conf.Addr)
 	if err != nil {
@@ -58,7 +62,9 @@ func Run(ctx context.Context, conf RunnerConfig) error {
 	}
 	// lis.Close by the grpcServer
 
-	grpcServer := server.InstrumentedGrpcServer(monitoringOpts,
+	grpcServer := server.InstrumentedGrpcServerWithExcludedMethodLogs(
+		monitoringOpts,
+		[]string{runnergrpc.Runner_Heartbeat_FullMethodName},
 		server.WithDownloadMetaHolder,
 		server.WithInstanceStartMetaHolder,
 		server.WithInvokeMetaHolder,
@@ -72,6 +78,15 @@ func Run(ctx context.Context, conf RunnerConfig) error {
 		}
 		close(errCh)
 	}()
+
+	registerCtx, registerCancel := context.WithTimeout(ctx, 5*time.Second)
+	if err := runnerServer.registerWithCommander(registerCtx, conf.Addr); err != nil {
+		registerCancel()
+		grpcServer.GracefulStop()
+		runnerCloser()
+		return fmt.Errorf("failed to register runner: %w", err)
+	}
+	registerCancel()
 
 	select {
 	case <-ctx.Done():

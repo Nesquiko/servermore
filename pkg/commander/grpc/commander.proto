@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package commander;
 
-option go_package = "github.com/Nesquiko/servermore/pkg/commander";
+option go_package = "github.com/Nesquiko/servermore/pkg/commander/grpc";
 
 message HeartbeatRequest {}
 message HeartbeatResponse {}

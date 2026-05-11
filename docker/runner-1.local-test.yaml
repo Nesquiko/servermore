@@ -1,0 +1,11 @@
+app_name: runner-1
+commit_hash: local-test
+env: PROD
+otel_on: true
+addr: runner-1:42071
+commander_host: commander
+commander_http_port: "42069"
+commander_grpc_port: "42070"
+instance_shutdown_after: 10s
+instance_grace_period: 1s
+func_storage_root: /data/functions

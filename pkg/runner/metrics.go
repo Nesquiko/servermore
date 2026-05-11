@@ -1,50 +1,121 @@
 package runner
 
 import (
-	"fmt"
+	"context"
 	"time"
 
-	"github.com/shirou/gopsutil/v4/cpu"
-	"github.com/shirou/gopsutil/v4/mem"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
-type SystemMetrics struct {
-	CPUPercent        float64
-	UnusedMemoryBytes uint64
+type RunnerMetrics struct {
+	prepareDownloadDur  metric.Float64Histogram
+	prepareStartDur     metric.Float64Histogram
+	invokeQueueWait     metric.Float64Histogram
+	invokeGuestDuration metric.Float64Histogram
+	instanceQueueDepth  metric.Int64ObservableGauge
+	instancesActive     metric.Int64ObservableGauge
+	registrations       []metric.Registration
 }
 
-type MetricsCollector struct {
-	lastCallTime time.Time
-}
+func NewRunnerMetrics(instances *InstancesStates) (*RunnerMetrics, error) {
+	meter := otel.GetMeterProvider().Meter("github.com/Nesquiko/servermore/runner")
 
-func NewMetricsCollector() *MetricsCollector {
-	return &MetricsCollector{
-		lastCallTime: time.Now(),
-	}
-}
-
-func (mc *MetricsCollector) Collect() (SystemMetrics, error) {
-	metrics := SystemMetrics{}
-
-	now := time.Now()
-	interval := now.Sub(mc.lastCallTime)
-	mc.lastCallTime = now
-
-	// Get system-wide CPU usage
-	cpuPercents, err := cpu.Percent(interval, false)
+	prepareDownloadDur, err := meter.Float64Histogram("runner_prepare_download_duration_seconds")
 	if err != nil {
-		return metrics, fmt.Errorf("failed to get CPU stats: %w", err)
+		return nil, err
 	}
-	if len(cpuPercents) > 0 {
-		metrics.CPUPercent = cpuPercents[0]
+	prepareStartDur, err := meter.Float64Histogram("runner_prepare_start_duration_seconds")
+	if err != nil {
+		return nil, err
+	}
+	invokeQueueWait, err := meter.Float64Histogram("runner_invoke_queue_wait_seconds")
+	if err != nil {
+		return nil, err
+	}
+	invokeGuestDuration, err := meter.Float64Histogram("runner_invoke_guest_duration_seconds")
+	if err != nil {
+		return nil, err
+	}
+	instanceQueueDepth, err := meter.Int64ObservableGauge("runner_instance_queue_depth")
+	if err != nil {
+		return nil, err
+	}
+	instancesActive, err := meter.Int64ObservableGauge("runner_instances_active")
+	if err != nil {
+		return nil, err
 	}
 
-	// Get system-wide memory stats
-	memStats, err := mem.VirtualMemory()
-	if err != nil {
-		return metrics, fmt.Errorf("failed to get memory stats: %w", err)
+	metrics := &RunnerMetrics{
+		prepareDownloadDur:  prepareDownloadDur,
+		prepareStartDur:     prepareStartDur,
+		invokeQueueWait:     invokeQueueWait,
+		invokeGuestDuration: invokeGuestDuration,
+		instanceQueueDepth:  instanceQueueDepth,
+		instancesActive:     instancesActive,
 	}
-	metrics.UnusedMemoryBytes = memStats.Available
+
+	registration, err := meter.RegisterCallback(
+		func(ctx context.Context, obs metric.Observer) error {
+			obs.ObserveInt64(instancesActive, int64(instances.ActiveInstancesCount()))
+
+			for instanceID, depth := range instances.QueueDepths(0) {
+				obs.ObserveInt64(
+					instanceQueueDepth,
+					int64(depth),
+					metric.WithAttributes(attribute.String("instance_id", instanceID)),
+				)
+			}
+
+			return nil
+		},
+		instancesActive,
+		instanceQueueDepth,
+	)
+	if err != nil {
+		return nil, err
+	}
+	metrics.registrations = append(metrics.registrations, registration)
 
 	return metrics, nil
+}
+
+func (m *RunnerMetrics) Close() {
+	if m == nil {
+		return
+	}
+	for _, reg := range m.registrations {
+		if reg != nil {
+			_ = reg.Unregister()
+		}
+	}
+}
+
+func (m *RunnerMetrics) RecordPrepareDownload(ctx context.Context, took time.Duration) {
+	if m == nil {
+		return
+	}
+	m.prepareDownloadDur.Record(ctx, took.Seconds())
+}
+
+func (m *RunnerMetrics) RecordPrepareStart(ctx context.Context, took time.Duration) {
+	if m == nil {
+		return
+	}
+	m.prepareStartDur.Record(ctx, took.Seconds())
+}
+
+func (m *RunnerMetrics) RecordInvokeQueueWait(ctx context.Context, took time.Duration) {
+	if m == nil {
+		return
+	}
+	m.invokeQueueWait.Record(ctx, took.Seconds())
+}
+
+func (m *RunnerMetrics) RecordInvokeGuestDuration(ctx context.Context, took time.Duration) {
+	if m == nil {
+		return
+	}
+	m.invokeGuestDuration.Record(ctx, took.Seconds())
 }

@@ -88,6 +88,16 @@ func TestInMemoryCache_StatsPerRunner_Empty(t *testing.T) {
 	assert.Empty(t, stats)
 }
 
+func TestInMemoryCache_CachedInstancesCount(t *testing.T) {
+	cache := NewInMemoryCache()
+	require.NoError(t, cache.SetInstance(context.Background(), "fn-1", "inst-a", "runner:9000", 3))
+	require.NoError(t, cache.SetInstance(context.Background(), "fn-2", "inst-b", "runner:9001", 7))
+
+	count, err := cache.CachedInstancesCount(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 2, count)
+}
+
 func TestInMemoryCache_UpsertRunnerHeartbeat(t *testing.T) {
 	cache := NewInMemoryCache()
 	require.NoError(t, cache.SetInstance(context.Background(), "fn-1", "inst-a", "runner:9000", 3))

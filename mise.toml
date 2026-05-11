@@ -10,6 +10,22 @@ air = "1.64.5"
 golangci-lint = "2.11.4"
 "aqua:golang-migrate/migrate" = "4.19.1"
 
+[tasks.local-test]
+description = "Runs the servmore tester TUI"
+run = '''
+if ! command -v docker >/dev/null 2>&1; then
+	echo 'local-test requires docker and docker compose; they are not maintained by mise.' >&2
+	exit 1
+fi
+
+if ! docker compose version >/dev/null 2>&1; then
+	echo 'local-test requires docker and docker compose; they are not maintained by mise.' >&2
+	exit 1
+fi
+
+go run ./cmd/servermore-tester
+'''
+
 [tasks.compile]
 description = "Generates necessary source files and checks if everything is correct."
 depends = ['sqlc-generate', 'openapi-generate', 'grpc-generate']
@@ -70,16 +86,5 @@ description = "Generates code from proto files"
 run = [
 	'protoc --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:. pkg/guest/guest.proto',
 	'protoc --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:. pkg/runner/grpc/runner.proto',
-	'protoc --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:. pkg/commander/commander.proto'
-]
-
-[tasks.test-gateway]
-description = "Runs gateway tests"
-depends = ['compile']
-usage = '''
-flag "--count <count>" help="How many times to run tests" default="1"
-'''
-run = [
-    'go build -o ./tmp/testing-guest ./test/testing-guest',
-    'go test -v ${usage_count:+-count ${usage_count}} ./test/gateway/...',
+	'protoc --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:. pkg/commander/grpc/commander.proto'
 ]

@@ -7,12 +7,14 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 
 	"github.com/go-chi/httplog/v3"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
 	otelchimetric "github.com/riandyrn/otelchi/metric"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
@@ -23,18 +25,18 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/stats"
 )
 
 type MonitoringOpts struct {
-	// Env value: PROD | TEST | LOCAL
-	Env string
+	Env Environment `yaml:"env"`
 
-	AppName         string
-	AppVersion      string
-	AdditionalAttrs map[string]string
+	AppName         string            `yaml:"app_name"`
+	AppVersion      string            `yaml:"app_version"`
+	AdditionalAttrs map[string]string `yaml:"additional_attrs"`
 
-	Level  slog.Level
-	OTELOn bool
+	Level  slog.Level `yaml:"level"`
+	OTELOn bool       `yaml:"otel_on"`
 }
 
 func (o MonitoringOpts) IsDev() bool {
@@ -63,7 +65,7 @@ func InitOTEL(
 		resource.WithAttributes(
 			semconv.ServiceNameKey.String(opts.AppName),
 			semconv.ServiceVersionKey.String(opts.AppVersion),
-			semconv.DeploymentEnvironmentName(opts.Env),
+			semconv.DeploymentEnvironmentName(string(opts.Env)),
 		),
 	)
 	if err != nil {
@@ -158,19 +160,24 @@ func CreateHTTPLogger(opts MonitoringOpts) func(http.Handler) http.Handler {
 		RecoverPanics:     true,
 		LogRequestHeaders: []string{"Origin"},
 		LogExtraAttrs: func(req *http.Request, _ string, _ int) []slog.Attr {
+			attrs := httpContextAttrs(req.Context())
+
 			apiErr := GetAPIError(req.Context())
 			if apiErr == nil {
-				return nil
+				if len(attrs) == 0 {
+					return nil
+				}
+				return attrs
 			}
 
-			attrs := []slog.Attr{
+			attrs = append(attrs,
 				slog.String("error", apiErr.cause.Error()),
 				slog.String("api.error.code", apiErr.Code),
 				slog.Int("api.error.status", apiErr.Status),
 				slog.String("api.error.instance", apiErr.Instance),
 				slog.String("api.error.title", apiErr.Title),
 				slog.String("api.error.detail", apiErr.Detail),
-			}
+			)
 
 			return attrs
 		},
@@ -181,9 +188,27 @@ func InstrumentedGrpcServer(
 	opts MonitoringOpts,
 	interceptors ...grpc.UnaryServerInterceptor,
 ) *grpc.Server {
-	interceptors = append(interceptors, grpcServerLogger(opts))
+	return InstrumentedGrpcServerWithExcludedMethodLogs(opts, nil, interceptors...)
+}
+
+func InstrumentedGrpcServerWithExcludedMethodLogs(
+	opts MonitoringOpts,
+	logExcludedMethods []string,
+	interceptors ...grpc.UnaryServerInterceptor,
+) *grpc.Server {
+	interceptors = append(
+		interceptors,
+		grpcServerTraceInterceptor(logExcludedMethods),
+		grpcServerLogger(opts, logExcludedMethods),
+	)
 	return grpc.NewServer(
-		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+		grpc.StatsHandler(
+			otelgrpc.NewServerHandler(otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool {
+				return grpcMethodAllowed(info.FullMethodName, logExcludedMethods)
+			})),
+		),
+		grpc.MaxRecvMsgSize(GrpcMaxBytes),
+		grpc.MaxSendMsgSize(GrpcMaxBytes),
 		grpc.ChainUnaryInterceptor(interceptors...),
 	)
 }
@@ -192,11 +217,30 @@ func LoggingGrpcClient(
 	addr string,
 	opts MonitoringOpts,
 ) (conn *grpc.ClientConn, err error) {
+	return LoggingGrpcClientWithExcludedMethodLogs(addr, opts, nil)
+}
+
+func LoggingGrpcClientWithExcludedMethodLogs(
+	addr string,
+	opts MonitoringOpts,
+	logExcludedMethods []string,
+) (conn *grpc.ClientConn, err error) {
 	return grpc.NewClient(
 		addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
-		grpc.WithChainUnaryInterceptor(grpcClientLogger(opts)),
+		grpc.WithStatsHandler(
+			otelgrpc.NewClientHandler(otelgrpc.WithFilter(func(info *stats.RPCTagInfo) bool {
+				return grpcMethodAllowed(info.FullMethodName, logExcludedMethods)
+			})),
+		),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(GrpcMaxBytes),
+			grpc.MaxCallSendMsgSize(GrpcMaxBytes),
+		),
+		grpc.WithChainUnaryInterceptor(
+			grpcClientTraceInterceptor(logExcludedMethods),
+			grpcClientLogger(opts, logExcludedMethods),
+		),
 	)
 }
 
@@ -205,17 +249,40 @@ func GrpcClient(addr string) (conn *grpc.ClientConn, err error) {
 		addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(GrpcMaxBytes),
+			grpc.MaxCallSendMsgSize(GrpcMaxBytes),
+		),
+		grpc.WithChainUnaryInterceptor(grpcClientTraceInterceptor(nil)),
 	)
 }
 
-func grpcServerLogger(opts MonitoringOpts) grpc.UnaryServerInterceptor {
+func grpcServerLogger(
+	opts MonitoringOpts,
+	logExcludedMethods []string,
+) grpc.UnaryServerInterceptor {
 	grpcInterceptor, grpcLoggingOpts := grpcLogger(opts)
-	return logging.UnaryServerInterceptor(grpcInterceptor, grpcLoggingOpts...)
+	interceptor := logging.UnaryServerInterceptor(grpcInterceptor, grpcLoggingOpts...)
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
+		if !grpcMethodAllowed(info.FullMethod, logExcludedMethods) {
+			return handler(ctx, req)
+		}
+		return interceptor(ctx, req, info, handler)
+	}
 }
 
-func grpcClientLogger(opts MonitoringOpts) grpc.UnaryClientInterceptor {
+func grpcClientLogger(
+	opts MonitoringOpts,
+	logExcludedMethods []string,
+) grpc.UnaryClientInterceptor {
 	grpcInterceptor, grpcLoggingOpts := grpcLogger(opts)
-	return logging.UnaryClientInterceptor(grpcInterceptor, grpcLoggingOpts...)
+	interceptor := logging.UnaryClientInterceptor(grpcInterceptor, grpcLoggingOpts...)
+	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		if !grpcMethodAllowed(method, logExcludedMethods) {
+			return invoker(ctx, method, req, reply, cc, opts...)
+		}
+		return interceptor(ctx, method, req, reply, cc, invoker, opts...)
+	}
 }
 
 func grpcLogger(opts MonitoringOpts) (logging.LoggerFunc, []logging.Option) {
@@ -225,37 +292,7 @@ func grpcLogger(opts MonitoringOpts) (logging.LoggerFunc, []logging.Option) {
 		logging.WithLogOnEvents(logging.StartCall, logging.FinishCall),
 		logging.WithDurationField(logging.DurationToDurationField),
 		logging.WithFieldsFromContext(func(ctx context.Context) logging.Fields {
-			fields := logging.Fields{}
-
-			if span := trace.SpanContextFromContext(ctx); span.IsSampled() {
-				fields = append(fields, "trace_id", span.TraceID().String())
-			}
-
-			downloadMeta := GetDownloadMeta(ctx)
-			if downloadMeta != nil {
-				fields = append(fields, downloadMeta.Fields()...)
-			}
-
-			instanceStartMeta := GetInstanceStartMeta(ctx)
-			if instanceStartMeta != nil {
-				fields = append(fields, instanceStartMeta.Fields()...)
-			}
-
-			invokeMeta := GetInvokeMeta(ctx)
-			if invokeMeta != nil {
-				fields = append(fields, invokeMeta.Fields()...)
-			}
-
-			registerRunnerMeta := GetRegisterRunnerMeta(ctx)
-			if registerRunnerMeta != nil {
-				fields = append(fields, registerRunnerMeta.Fields()...)
-			}
-
-			if len(fields) == 0 {
-				return nil
-			}
-
-			return fields
+			return contextFields(ctx)
 		}),
 	}
 
@@ -268,12 +305,55 @@ func grpcLogger(opts MonitoringOpts) (logging.LoggerFunc, []logging.Option) {
 	return grpcInterceptor, grpcLoggingOpts
 }
 
+func grpcServerTraceInterceptor(logExcludedMethods []string) grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
+		if !grpcMethodAllowed(info.FullMethod, logExcludedMethods) {
+			return handler(ctx, req)
+		}
+		resp, err = handler(ctx, req)
+		annotateSpan(ctx, err)
+		return resp, err
+	}
+}
+
+func grpcClientTraceInterceptor(logExcludedMethods []string) grpc.UnaryClientInterceptor {
+	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) (err error) {
+		if !grpcMethodAllowed(method, logExcludedMethods) {
+			return invoker(ctx, method, req, reply, cc, opts...)
+		}
+		err = invoker(ctx, method, req, reply, cc, opts...)
+		annotateSpan(ctx, err)
+		return err
+	}
+}
+
+func grpcMethodAllowed(method string, excludedMethods []string) bool {
+	return !slices.Contains(excludedMethods, method)
+}
+
+func annotateSpan(ctx context.Context, err error) {
+	span := trace.SpanFromContext(ctx)
+	if !span.IsRecording() {
+		return
+	}
+
+	attrs := contextAttributes(ctx)
+	if len(attrs) > 0 {
+		span.SetAttributes(attrs...)
+	}
+
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+}
+
 func slogLogger(opts MonitoringOpts, slogOpts *slog.HandlerOptions) *slog.Logger {
 	logger := slog.
-		New(slog.NewTextHandler(os.Stdout, slogOpts)).
+		New(slogHandler(opts, slogOpts)).
 		With(
 			slog.String("app", opts.AppName),
-			slog.String("env", opts.Env),
+			slog.String("env", string(opts.Env)),
 		)
 
 	if opts.AppVersion != "" {
@@ -285,7 +365,23 @@ func slogLogger(opts MonitoringOpts, slogOpts *slog.HandlerOptions) *slog.Logger
 			logger = logger.With(slog.String(k, v))
 		}
 	}
-	slog.SetDefault(logger)
 
 	return logger
+}
+
+func SetDefaultLogger(opts MonitoringOpts) {
+	slog.SetDefault(slogLogger(opts, &slog.HandlerOptions{Level: opts.Level}))
+}
+
+func InjectTraceContext(ctx context.Context, req *http.Request) error {
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
+	return nil
+}
+
+func slogHandler(opts MonitoringOpts, slogOpts *slog.HandlerOptions) slog.Handler {
+	if opts.IsDev() {
+		return slog.NewTextHandler(os.Stdout, slogOpts)
+	}
+
+	return slog.NewJSONHandler(os.Stdout, slogOpts)
 }

@@ -9,20 +9,12 @@ import (
 	"github.com/Nesquiko/servermore/pkg/server"
 )
 
-const FunctionIdPathParam = "functionId"
-
 func main() {
-	ctx := context.Background()
-	opts := server.MonitoringOpts{
-		AppName:    "gateway",
-		AppVersion: "0.0.1",
-		Env:        "LOCAL",
-	}
+	config := server.ParseFlagsAndLoadConfig[gateway.GatewayConfig]()
 
-	gateway_cfg := gateway.GatewayConfig{}
-	if err := gateway.Run(ctx, opts, gateway_cfg); err != nil {
+	ctx := context.Background()
+	if err := gateway.Run(ctx, config); err != nil {
 		slog.Error("gateway failed", "error", err)
 		os.Exit(1)
 	}
-
 }

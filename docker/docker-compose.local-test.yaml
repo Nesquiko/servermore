@@ -1,0 +1,157 @@
+services:
+  commander:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.commander
+    command: ["--config", "/config/commander.local-test.yaml"]
+    depends_on:
+      - alloy
+    environment: &servermore-otel-env
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+    ports:
+      - "42069:42069"
+      - "42070:42070"
+    volumes:
+      - ./commander.local-test.yaml:/config/commander.local-test.yaml:ro
+      - commander-data:/data
+    restart: on-failure
+
+  runner-1:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runner
+    command: ["--config", "/config/runner-1.local-test.yaml"]
+    depends_on:
+      - alloy
+      - commander
+    environment: *servermore-otel-env
+    volumes:
+      - ./runner-1.local-test.yaml:/config/runner-1.local-test.yaml:ro
+      - runner-1-data:/data
+    restart: on-failure
+
+  runner-2:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runner
+    command: ["--config", "/config/runner-2.local-test.yaml"]
+    depends_on:
+      - alloy
+      - commander
+    environment: *servermore-otel-env
+    volumes:
+      - ./runner-2.local-test.yaml:/config/runner-2.local-test.yaml:ro
+      - runner-2-data:/data
+    restart: on-failure
+
+  runner-3:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runner
+    command: ["--config", "/config/runner-3.local-test.yaml"]
+    depends_on:
+      - alloy
+      - commander
+    environment: *servermore-otel-env
+    volumes:
+      - ./runner-3.local-test.yaml:/config/runner-3.local-test.yaml:ro
+      - runner-3-data:/data
+    restart: on-failure
+
+  gateway:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.gateway
+    command: ["--config", "/config/gateway.local-test.yaml"]
+    depends_on:
+      - alloy
+      - commander
+    environment: *servermore-otel-env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./gateway.local-test.yaml:/config/gateway.local-test.yaml:ro
+    restart: on-failure
+
+  alloy:
+    image: grafana/alloy:v1.9.0
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy
+      - /etc/alloy/config.alloy
+    depends_on:
+      - loki
+      - tempo
+      - mimir
+    ports:
+      - "12345:12345"
+      - "4317:4317"
+      - "4318:4318"
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - alloy-data:/var/lib/alloy
+    restart: on-failure
+
+  loki:
+    image: grafana/loki:3.1.0
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    restart: on-failure
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    ports:
+      - "3200:3200"
+      - "4319:4317"
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    restart: on-failure
+
+  mimir:
+    image: grafana/mimir:2.15.0
+    command: ["-config.file=/etc/mimir/mimir.yaml", "-config.expand-env=true"]
+    ports:
+      - "9009:9009"
+    volumes:
+      - ./mimir/mimir.yaml:/etc/mimir/mimir.yaml:ro
+      - mimir-data:/data
+    restart: on-failure
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    depends_on:
+      - loki
+      - tempo
+      - mimir
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    restart: on-failure
+
+volumes:
+  alloy-data:
+  commander-data:
+  grafana-data:
+  loki-data:
+  mimir-data:
+  runner-1-data:
+  runner-2-data:
+  runner-3-data:
+  tempo-data:
