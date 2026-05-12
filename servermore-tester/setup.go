@@ -297,6 +297,8 @@ func stopStack(ctx context.Context, rootDir string) error {
 		"-f",
 		composeFile,
 		"down",
+		"-v",
+		"--remove-orphans",
 	)
 	return err
 }

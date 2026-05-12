@@ -30,7 +30,7 @@
 
 \section{The goal}
 
-This project builds our own "serverless" (FaaS - Function as a Service) platform,
+This project is about building a "serverless" (FaaS - Function as a Service) platform,
 inspired by ones like AWS Lambda. The goal is create a system, which can based
 on incoming HTTP requests dynamically start instances, process the request and
 then teardown the instance. Thus removing the need of a permanently running server.
@@ -46,12 +46,28 @@ Architecture is split into multiple components:
 	\item \textbf{Commander:} The "brain" of the whole system. Decides which
 	      instance to use for incoming requests, whether to create new one (cold start),
 	      or reuse already running one (warm). Also responsible for storing
-	      user function binaries and serves them to the rest of the system.
+	      user function binaries and serving them to the rest of the system.
 	\item \textbf{Runner:} Component running on execution nodes, which process
 	      the incoming requests by executing user's functions.
 	\item \textbf{Guest:} The user's submitted functions. They take in
 	      the request, process it, and return a response.
 \end{enumerate}
+
+The whole request path is shown in Figure~\ref{fig:request-flow}. A client
+sends an HTTP request to the Gateway, which strips the function identifier from
+the path and asks the Commander where to route it. If a healthy warm instance is
+already running, the Commander returns that runner and instance immediately.
+Otherwise it asks a Runner to prepare a new instance, download the binary if
+needed, start the Guest, and return the new instance identifier. The Gateway
+then forwards the invocation to the selected Runner, which calls the Guest over
+gRPC and returns the response back to the client.
+
+\begin{figure}[ht]
+	\centering
+	\includegraphics[width=\textwidth]{request-flow.png}
+	\caption{High-level request flow through the platform}
+	\label{fig:request-flow}
+\end{figure}
 
 \section{Tech stack}
 
@@ -70,12 +86,14 @@ The platform is built with the following technologies:
 		      \item Query code is generated with \href{https://sqlc.dev/}{sqlc} to keep database access type-safe.
 	      \end{itemize}
 	\item \textbf{Structured logging}: implemented with Go's \href{https://go.dev/blog/slog}{slog}.
-	\item \textbf{Instrumentation}: based on \href{https://opentelemetry.io/docs/languages/go/}{OTEL}.
-	      \begin{itemize}[leftmargin=*]
-		      \item HTTP server instrumentation uses \href{https://github.com/riandyrn/otelchi}{otelchi}.
-		      \item gRPC instrumentation uses \href{https://pkg.go.dev/go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc}{otelgrpc}.
+	\item \textbf{Monitoring:} \begin{itemize}
+		      \item \textbf{Instrumentation}: based on \href{https://opentelemetry.io/docs/languages/go/}{OTEL}.
+		            \begin{itemize}[leftmargin=*]
+			            \item HTTP server instrumentation uses \href{https://github.com/riandyrn/otelchi}{otelchi}.
+			            \item gRPC instrumentation uses \href{https://pkg.go.dev/go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc}{otelgrpc}.
+		            \end{itemize}
+		      \item \textbf{Visualization}: provided by the \href{https://grafana.com/}{Grafana} stack.
 	      \end{itemize}
-	\item \textbf{Visualization}: provided by the \href{https://grafana.com/}{Grafana} stack.
 \end{itemize}
 
 \section{API Gateway}
@@ -123,7 +141,6 @@ invocation to that runner and sends the response back to the client.
 	\end{tikzpicture}
 	\caption{High-level request flow through the API Gateway}
 \end{figure}
-\pagebreak
 
 \section{Commander}
 
@@ -181,7 +198,7 @@ instances that are already running, instances that are still starting, and
 downloads that are already in flight. When several requests arrive at once,
 they all wait on the same startup or download result, which lets them collapse
 into one shared preparation path. Once an instance is running, requests are
-serialized through its queue, and idle instances are stopped after the
+put and processed through its queue, and idle instances are stopped after the
 configured timeout.
 
 The runner launches each function inside a runtime and communicates with it
@@ -204,7 +221,6 @@ The only requirement from the runtime is that it provides the environment
 variables needed to configure the guest server, such as the address it should
 bind to.
 
-\clearpage
 \section{Monitoring}
 
 The monitoring stack is built around the Grafana stack.
@@ -213,11 +229,8 @@ Alloy over gRPC. Alloy reads the Docker container logs from the same compose
 setup, filters them down to the servermore services, and forwards them to Loki.
 It also receives traces and metrics over OTLP, forwards traces to Tempo, and
 forwards metrics to Mimir. Grafana is provisioned with all three datasources,
-including trace-to-log correlation from Tempo into Loki.
-
-Logs are written by the Go services with structured \texttt{slog}. Docker captures
-that output from the containers, and Alloy tails it directly through the Docker
-socket. Traces and spans come from OpenTelemetry instrumentation in the Go code.
+including trace-to-log correlation from Tempo into Loki. Figure~\ref{fig:monitoring-stack}
+displays the whole flow.
 
 \begin{figure}[ht]
 	\centering
@@ -225,9 +238,10 @@ socket. Traces and spans come from OpenTelemetry instrumentation in the Go code.
 	\caption{Monitoring stack and telemetry flow}
 	\label{fig:monitoring-stack}
 \end{figure}
+\pagebreak
 
 An example of how this monitoring is visualized in the following trace
-screenshot (\ref{fig:grafana-trace}). It shows a single request flowing through the Gateway,
+screenshot~\ref{fig:grafana-trace}. It shows a single request flowing through the Gateway,
 Commander, Runner, and Guest. Because the same trace context is propagated
 through the HTTP and gRPC hops, the full request stays in one trace and the logs
 can be linked back to the same span tree.
@@ -240,7 +254,7 @@ can be linked back to the same span tree.
 \end{figure}
 
 And with this visualization we can see some hints of the serverless scaling.
-The screenshot (\ref{fig:function-scaling}) shows why warm reuse matters. The first request pays the
+The screenshot~\ref{fig:function-scaling} shows why warm reuse matters. The first request pays the
 cold-start cost, the second still waits for that cold start to finish, and the
 following requests complete in milliseconds because they reuse the already warm
 instance.
@@ -251,5 +265,63 @@ instance.
 	\caption{Warm instance reuse keeps subsequent requests in the millisecond range}
 	\label{fig:function-scaling}
 \end{figure}
+
+\clearpage
+\section{Setup}
+
+To run Servermore locally, Docker must already be installed and usable without
+\texttt{sudo}, including the Docker Compose. After that, install
+\href{https://mise.jdx.dev/getting-started.html}{mise} and run \texttt{mise install}.
+That installs the project toolchain and generators declared in
+\texttt{mise.toml}, including Go, \texttt{sqlc}, \texttt{oapi-codegen}, and
+\texttt{protoc}.
+
+\subsection{Local test}
+
+Running \texttt{mise local-test} opens the tester TUI. It first compiles the
+example functions and then starts
+\texttt{docker/docker-compose.local-test.yaml}. The first startup takes a while
+because Docker has to pull the Grafana stack images and build the Servermore
+service images. Once the stack is ready, the TUI can deploy a function, and
+after deployment it starts sending requests to that function automatically.
+When the TUI quits, it brings the stack down and removes the Compose volumes.
+
+The request settings are:
+
+\begin{itemize}[leftmargin=*]
+	\item \textbf{Batch size}: how many requests the TUI sends in one burst before it pauses.
+	\item \textbf{Requests/s}: the request rate inside a burst.
+	\item \textbf{Delay (s)}: how long the TUI waits between bursts.
+\end{itemize}
+
+Use \texttt{0} to enable or disable request sending, \texttt{up/down} or
+\texttt{k/j} to select a setting, \texttt{+/\-} to change it, and
+\texttt{enter} to deploy the selected function. The TUI also shows a Grafana
+link and can start Dozzle on demand for quick container log browsing
+(\href{https://dozzle.dev/}{dozzle.dev}).
+
+\subsubsection{Grafana}
+
+Open Grafana and use \texttt{Explore}. Loki shows logs, Tempo shows traces, and
+Mimir provides metrics through the Prometheus datasource. The trace view shows
+the full request path through the gateway, commander, runner, and guest. Logs
+and traces are not real-time, expect roughly a minute before they appear in
+Grafana.
+
+\section{Conclusion}
+
+Servermore is a working little version of a serverless function platform
+The current version handles cold starts and warm reuse, routes requests
+through the Commander, and executes user functions through the Runner and Guest
+layers.
+
+The project also shows the value of observability. With traces, logs, and
+metrics in Grafana, it is possible to follow a request across HTTP and gRPC
+boundaries and understand how the platform behaves under load. The local test
+setup makes this easy to reproduce and inspect end to end.
+
+Future work could focus on better scheduling, stronger isolation for guest
+execution, persistent state outside SQLite, and support for more runtimes and
+languages.
 
 \end{document}
