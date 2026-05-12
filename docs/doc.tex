@@ -1,0 +1,48 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[slovak]{babel}
+\usepackage[margin=1in]{geometry}
+\usepackage{titlesec}
+\usepackage{hyperref}
+\usepackage{enumitem}
+
+% Formátovanie nadpisov
+\titleformat{\section}{\large\bfseries}{}{0em}{}[\titlerule]
+\titlespacing*{\section}{0pt}{12pt}{8pt}
+
+\title{\textbf{Servermore: Serverless platform}}
+\author{Bc. Vojtech Babinský, Bc. Lukáš Častven, Bc. Matúš Koleják, Bc. Andrej Streicher}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{The goal}
+
+This project builds our own "serverless" (FaaS - Function as a Service) platform,
+inspired by ones like AWS Lambda. The goal is create a system, which can based
+on incoming HTTP requests dynamically start instances, process the request and
+then teardown the instance. Thus removing the need of a permanently running server.
+
+\section{Architecture}
+
+Architecture is split into multiple components:
+
+\begin{enumerate}
+	\item \textbf{API Gateway:} Service, which accepts incoming requests,
+	      transforms them into a inner system representation and sends
+	      them further into the system.
+	\item \textbf{Commander:} The "brain" of the whole system. Decides which
+	      instance to use for incoming requests, whether to create new one (cold start),
+	      or reuse already running one (warm). Also responsible for storing
+	      user function binaries and serves them to the rest of the system.
+	\item \textbf{Runner:} Component running on execution nodes, which process
+	      the incoming requests by executing user's functions.
+	\item \textbf{Functions:} The user's submitted functions. They take in
+	      the request, process it, and return a response.
+\end{enumerate}
+
+
+\end{document}
