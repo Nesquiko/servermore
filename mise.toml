@@ -23,6 +23,7 @@ if ! docker compose version >/dev/null 2>&1; then
 	exit 1
 fi
 
+mise compile
 go run ./cmd/servermore-tester
 '''
 

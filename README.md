@@ -24,7 +24,6 @@ The system is split into four components:
 - gRPC for internal communication
 - HTTP for public ingress defined through OpenAPI
 - `slog` for structured logging
-- Valkey
 
 ## Request Flow
 

@@ -1,0 +1,327 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+\usepackage[margin=1in]{geometry}
+\usepackage{titlesec}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage[outputdir=latex-builds]{minted}
+\usepackage{tikz}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!60!black,
+    urlcolor=teal!70!black,
+    citecolor=purple!60!black
+}
+
+\usetikzlibrary{arrows.meta,shapes.geometric}
+
+\title{\textbf{Servermore: Serverless platform}}
+\author{Bc. Vojtech Babinský, Bc. Lukáš Častven, Bc. Matúš Koleják, Bc. Andrej Streicher}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{The goal}
+
+This project is about building a "serverless" (FaaS - Function as a Service) platform,
+inspired by ones like AWS Lambda. The goal is create a system, which can based
+on incoming HTTP requests dynamically start instances, process the request and
+then teardown the instance. Thus removing the need of a permanently running server.
+
+\section{Architecture}
+
+Architecture is split into multiple components:
+
+\begin{enumerate}
+	\item \textbf{API Gateway:} Service, which accepts incoming requests,
+	      transforms them into a inner system representation and sends
+	      them further into the system.
+	\item \textbf{Commander:} The "brain" of the whole system. Decides which
+	      instance to use for incoming requests, whether to create new one (cold start),
+	      or reuse already running one (warm). Also responsible for storing
+	      user function binaries and serving them to the rest of the system.
+	\item \textbf{Runner:} Component running on execution nodes, which process
+	      the incoming requests by executing user's functions.
+	\item \textbf{Guest:} The user's submitted functions. They take in
+	      the request, process it, and return a response.
+\end{enumerate}
+
+The whole request path is shown in Figure~\ref{fig:request-flow}. A client
+sends an HTTP request to the Gateway, which strips the function identifier from
+the path and asks the Commander where to route it. If a healthy warm instance is
+already running, the Commander returns that runner and instance immediately.
+Otherwise it asks a Runner to prepare a new instance, download the binary if
+needed, start the Guest, and return the new instance identifier. The Gateway
+then forwards the invocation to the selected Runner, which calls the Guest over
+gRPC and returns the response back to the client.
+
+\begin{figure}[ht]
+	\centering
+	\includegraphics[width=\textwidth]{request-flow.png}
+	\caption{High-level request flow through the platform}
+	\label{fig:request-flow}
+\end{figure}
+
+\section{Tech stack}
+
+The platform is built with the following technologies:
+
+\begin{itemize}[leftmargin=*]
+	\item \textbf{Golang}: used as the programming language \href{https://go.dev/}{go.dev}.
+	\item \textbf{HTTP}: used for public ingress.
+	      \begin{itemize}[leftmargin=*]
+		      \item The Gateway accepts client requests over HTTP.
+		      \item The Commander function binaries API is also HTTP-based. It is defined with \href{https://www.openapis.org/}{OpenAPI} and generated with \href{https://github.com/oapi-codegen/oapi-codegen}{oapi-codegen}.
+	      \end{itemize}
+	\item \textbf{gRPC}: used for inner system communication \href{https://grpc.io/}{grpc.io}.
+	\item \textbf{SQLite}: used by Commander for storing data \href{https://sqlite.org/}{sqlite.org}. We chose it because we did not need to complicate the stack more and SQLite is enough for now; because the SQLite implementation is behind an interface, we could swap it for PostgreSQL easily.
+	      \begin{itemize}[leftmargin=*]
+		      \item Query code is generated with \href{https://sqlc.dev/}{sqlc} to keep database access type-safe.
+	      \end{itemize}
+	\item \textbf{Structured logging}: implemented with Go's \href{https://go.dev/blog/slog}{slog}.
+	\item \textbf{Monitoring:} \begin{itemize}
+		      \item \textbf{Instrumentation}: based on \href{https://opentelemetry.io/docs/languages/go/}{OTEL}.
+		            \begin{itemize}[leftmargin=*]
+			            \item HTTP server instrumentation uses \href{https://github.com/riandyrn/otelchi}{otelchi}.
+			            \item gRPC instrumentation uses \href{https://pkg.go.dev/go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc}{otelgrpc}.
+		            \end{itemize}
+		      \item \textbf{Visualization}: provided by the \href{https://grafana.com/}{Grafana} stack.
+	      \end{itemize}
+\end{itemize}
+
+\section{API Gateway}
+
+The API Gateway is the stateless public HTTP entrypoint of the system. It receives
+requests from clients, extracts the function identifier from the URL,
+normalizes the request into the internal format used by the platform, and then
+asks the Commander where the request should be executed. After Commander
+returns the selected runner and instance identifier, the Gateway forwards the
+invocation to that runner and sends the response back to the client.
+
+\begin{figure}[ht]
+	\centering
+	\begin{tikzpicture}[
+			font=\small,
+			>=Latex,
+			participant/.style={
+					draw,
+					rounded corners,
+					minimum width=2.8cm,
+					minimum height=0.9cm,
+					align=center,
+					fill=gray!10
+				},
+			lifeline/.style={dashed, gray!70},
+			call/.style={->, thick},
+			return/.style={->, thick, dashed}
+		]
+		\node[participant] (client) at (0,0) {Client};
+		\node[participant] (gateway) at (4,0) {Gateway};
+		\node[participant] (commander) at (9,0) {Commander};
+		\node[participant] (runner) at (12,0) {Runner};
+
+		\draw[lifeline] (0,-0.45) -- (0,-6.5);
+		\draw[lifeline] (4,-0.45) -- (4,-6.5);
+		\draw[lifeline] (9,-0.45) -- (9,-6.5);
+		\draw[lifeline] (12,-0.45) -- (12,-6.5);
+
+		\draw[call] (0,-1.5) -- node[above,align=center]{HTTP request\\\texttt{/\{functionId\}/...}} (4,-1.5);
+		\draw[call] (4,-2.3) -- node[above]{\texttt{RouteFunction(functionId)}} (9,-2.3);
+		\draw[return] (9,-3.4) -- node[above]{runner address, instance ID} (4,-3.4);
+		\draw[call] (4,-4.5) -- node[above]{\texttt{InvokeFunctionInstance(instanceId, request)}} (12,-4.5);
+		\draw[return] (12,-5.6) -- node[above]{HTTP response} (4,-5.6);
+		\draw[return] (4,-6.2) -- node[above]{HTTP response} (0,-6.2);
+	\end{tikzpicture}
+	\caption{High-level request flow through the API Gateway}
+\end{figure}
+
+\section{Commander}
+
+The Commander is the control plane of the platform. It keeps track of the
+current system state and decides where each request should be executed.
+Conceptually, it acts as the brain of the system: it knows which runners are
+available, which function instances are already running, and whether a request
+should reuse an existing warm instance or trigger a cold start.
+
+To maintain this knowledge, the Commander periodically polls runners for
+heartbeats. Those heartbeats report runner availability, queue depths, and
+resource usage, so the Commander can avoid overloaded or unavailable runners
+when making routing decisions.
+
+The Commander also exposes an HTTP API for uploading and downloading function
+binaries. Uploaded functions are stored and later served to runners when a new
+instance needs to be started and the runner doesn't have the function copy locally.
+
+For request routing, the Commander exposes a gRPC API used by the Gateway. The
+Gateway calls this API for each incoming request to ask for the routing
+decision, and the Commander returns the selected runner address together with
+the instance identifier that should handle the invocation. Figure~\ref{fig:commander-routing}
+shows the routing flow.
+
+\clearpage
+\begin{figure}[p]
+	\centering
+	\includegraphics[height=0.92\textheight]{routing-logic.png}
+	\caption{Routing logic flow}
+	\label{fig:commander-routing}
+\end{figure}
+\clearpage
+
+Commander persists its state in SQLite, which stores the function
+catalog and the registered runners:
+
+\inputminted[fontsize=\small,breaklines]{sql}{../pkg/commander/migrations/20260314155607_init.up.sql}
+
+At runtime, Commander also keeps an in-memory routing cache with the data used
+to answer routing decisions quickly. The implementation only now supports a in-memory
+one, but can easily be replaced by some other cache like Valkey. The new implementation
+would just need to adhere to this interface:
+
+\inputminted[fontsize=\scriptsize,breaklines,firstline=5,lastline=34]{go}{../pkg/caching/cache.go}
+
+\section{Runner}
+
+The Runner is the most complex part of the platform. It has to coordinate
+parallel instance startup, shutdown, binary downloads, and request execution at
+the same time, while still merging concurrent requests for the same function
+into one starting instance instead of spawning duplicate processes.
+
+The coordination model is the main challenge. The runner keeps track of
+instances that are already running, instances that are still starting, and
+downloads that are already in flight. When several requests arrive at once,
+they all wait on the same startup or download result, which lets them collapse
+into one shared preparation path. Once an instance is running, requests are
+put and processed through its queue, and idle instances are stopped after the
+configured timeout.
+
+The runner launches each function inside a runtime and communicates with it
+through the guest's gRPC server. Right now only the native runtime is
+implemented, where the binary is started directly on the host, a free port is
+assigned, and the guest is expected to serve gRPC on that port. The
+abstraction is intentionally small, so adding another runtime would not be
+difficult: a Docker runtime could copy the binary into a container and expose
+the gRPC port, while a JavaScript runtime could do the same with raw JS source
+and a container that provides a JS engine.
+
+\section{Guest}
+
+Guests are the user functions themselves. At the moment we provide only a Go
+SDK, which wraps the function and starts the gRPC server expected by the
+runtime. For other languages, SDKs for them would be similar, because gRPC implementations
+exists for many languages.
+
+The only requirement from the runtime is that it provides the environment
+variables needed to configure the guest server, such as the address it should
+bind to.
+
+\section{Monitoring}
+
+The monitoring stack is built around the Grafana stack.
+In the local test compose stack, the commander, gateway, and runners export OTLP data to
+Alloy over gRPC. Alloy reads the Docker container logs from the same compose
+setup, filters them down to the servermore services, and forwards them to Loki.
+It also receives traces and metrics over OTLP, forwards traces to Tempo, and
+forwards metrics to Mimir. Grafana is provisioned with all three datasources,
+including trace-to-log correlation from Tempo into Loki. Figure~\ref{fig:monitoring-stack}
+displays the whole flow.
+
+\begin{figure}[ht]
+	\centering
+	\includegraphics[width=\textwidth]{monitoring.png}
+	\caption{Monitoring stack and telemetry flow}
+	\label{fig:monitoring-stack}
+\end{figure}
+\pagebreak
+
+An example of how this monitoring is visualized in the following trace
+screenshot~\ref{fig:grafana-trace}. It shows a single request flowing through the Gateway,
+Commander, Runner, and Guest. Because the same trace context is propagated
+through the HTTP and gRPC hops, the full request stays in one trace and the logs
+can be linked back to the same span tree.
+
+\begin{figure}[ht]
+	\centering
+	\includegraphics[width=\textwidth]{grafana-trace.png}
+	\caption{Grafana trace view for a request passing through the platform}
+	\label{fig:grafana-trace}
+\end{figure}
+
+And with this visualization we can see some hints of the serverless scaling.
+The screenshot~\ref{fig:function-scaling} shows why warm reuse matters. The first request pays the
+cold-start cost, the second still waits for that cold start to finish, and the
+following requests complete in milliseconds because they reuse the already warm
+instance.
+
+\begin{figure}[ht]
+	\centering
+	\includegraphics[width=\textwidth]{function-scaling.png}
+	\caption{Warm instance reuse keeps subsequent requests in the millisecond range}
+	\label{fig:function-scaling}
+\end{figure}
+
+\clearpage
+\section{Setup}
+
+To run Servermore locally, Docker must already be installed and usable without
+\texttt{sudo}, including the Docker Compose. After that, install
+\href{https://mise.jdx.dev/getting-started.html}{mise} and run \texttt{mise install}.
+That installs the project toolchain and generators declared in
+\texttt{mise.toml}, including Go, \texttt{sqlc}, \texttt{oapi-codegen}, and
+\texttt{protoc}.
+
+\subsection{Local test}
+
+Running \texttt{mise local-test} opens the tester TUI. It first compiles the
+example functions and then starts
+\texttt{docker/docker-compose.local-test.yaml}. The first startup takes a while
+because Docker has to pull the Grafana stack images and build the Servermore
+service images. Once the stack is ready, the TUI can deploy a function, and
+after deployment it starts sending requests to that function automatically.
+When the TUI quits, it brings the stack down and removes the Compose volumes.
+
+The request settings are:
+
+\begin{itemize}[leftmargin=*]
+	\item \textbf{Batch size}: how many requests the TUI sends in one burst before it pauses.
+	\item \textbf{Requests/s}: the request rate inside a burst.
+	\item \textbf{Delay (s)}: how long the TUI waits between bursts.
+\end{itemize}
+
+Use \texttt{0} to enable or disable request sending, \texttt{up/down} or
+\texttt{k/j} to select a setting, \texttt{+/\-} to change it, and
+\texttt{enter} to deploy the selected function. The TUI also shows a Grafana
+link and can start Dozzle on demand for quick container log browsing
+(\href{https://dozzle.dev/}{dozzle.dev}).
+
+\subsubsection{Grafana}
+
+Open Grafana and use \texttt{Explore}. Loki shows logs, Tempo shows traces, and
+Mimir provides metrics through the Prometheus datasource. The trace view shows
+the full request path through the gateway, commander, runner, and guest. Logs
+and traces are not real-time, expect roughly a minute before they appear in
+Grafana.
+
+\section{Conclusion}
+
+Servermore is a working little version of a serverless function platform
+The current version handles cold starts and warm reuse, routes requests
+through the Commander, and executes user functions through the Runner and Guest
+layers.
+
+The project also shows the value of observability. With traces, logs, and
+metrics in Grafana, it is possible to follow a request across HTTP and gRPC
+boundaries and understand how the platform behaves under load. The local test
+setup makes this easy to reproduce and inspect end to end.
+
+Future work could focus on better scheduling, stronger isolation for guest
+execution, persistent state outside SQLite, and support for more runtimes and
+languages.
+
+\end{document}
