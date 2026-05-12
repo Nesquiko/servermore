@@ -204,4 +204,52 @@ The only requirement from the runtime is that it provides the environment
 variables needed to configure the guest server, such as the address it should
 bind to.
 
+\clearpage
+\section{Monitoring}
+
+The monitoring stack is built around the Grafana stack.
+In the local test compose stack, the commander, gateway, and runners export OTLP data to
+Alloy over gRPC. Alloy reads the Docker container logs from the same compose
+setup, filters them down to the servermore services, and forwards them to Loki.
+It also receives traces and metrics over OTLP, forwards traces to Tempo, and
+forwards metrics to Mimir. Grafana is provisioned with all three datasources,
+including trace-to-log correlation from Tempo into Loki.
+
+Logs are written by the Go services with structured \texttt{slog}. Docker captures
+that output from the containers, and Alloy tails it directly through the Docker
+socket. Traces and spans come from OpenTelemetry instrumentation in the Go code.
+
+\begin{figure}[ht]
+	\centering
+	\includegraphics[width=\textwidth]{monitoring.png}
+	\caption{Monitoring stack and telemetry flow}
+	\label{fig:monitoring-stack}
+\end{figure}
+
+An example of how this monitoring is visualized in the following trace
+screenshot (\ref{fig:grafana-trace}). It shows a single request flowing through the Gateway,
+Commander, Runner, and Guest. Because the same trace context is propagated
+through the HTTP and gRPC hops, the full request stays in one trace and the logs
+can be linked back to the same span tree.
+
+\begin{figure}[ht]
+	\centering
+	\includegraphics[width=\textwidth]{grafana-trace.png}
+	\caption{Grafana trace view for a request passing through the platform}
+	\label{fig:grafana-trace}
+\end{figure}
+
+And with this visualization we can see some hints of the serverless scaling.
+The screenshot (\ref{fig:function-scaling}) shows why warm reuse matters. The first request pays the
+cold-start cost, the second still waits for that cold start to finish, and the
+following requests complete in milliseconds because they reuse the already warm
+instance.
+
+\begin{figure}[ht]
+	\centering
+	\includegraphics[width=\textwidth]{function-scaling.png}
+	\caption{Warm instance reuse keeps subsequent requests in the millisecond range}
+	\label{fig:function-scaling}
+\end{figure}
+
 \end{document}
