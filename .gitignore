@@ -1,3 +1,4 @@
 /tmp
 **/*.gen*
 **/*.pb*
+/docs/latex-builds

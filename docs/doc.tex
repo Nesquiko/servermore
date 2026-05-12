@@ -1,15 +1,14 @@
 \documentclass[11pt,a4paper]{article}
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
-\usepackage[slovak]{babel}
+\usepackage[english]{babel}
 \usepackage[margin=1in]{geometry}
 \usepackage{titlesec}
 \usepackage{hyperref}
 \usepackage{enumitem}
+\usepackage{tikz}
 
-% Formátovanie nadpisov
-\titleformat{\section}{\large\bfseries}{}{0em}{}[\titlerule]
-\titlespacing*{\section}{0pt}{12pt}{8pt}
+\usetikzlibrary{arrows.meta}
 
 \title{\textbf{Servermore: Serverless platform}}
 \author{Bc. Vojtech Babinský, Bc. Lukáš Častven, Bc. Matúš Koleják, Bc. Andrej Streicher}
@@ -40,9 +39,55 @@ Architecture is split into multiple components:
 	      user function binaries and serves them to the rest of the system.
 	\item \textbf{Runner:} Component running on execution nodes, which process
 	      the incoming requests by executing user's functions.
-	\item \textbf{Functions:} The user's submitted functions. They take in
+	\item \textbf{Guest:} The user's submitted functions. They take in
 	      the request, process it, and return a response.
 \end{enumerate}
+
+\subsection{API Gateway}
+
+The API Gateway is the public HTTP entrypoint of the system. It receives
+requests from clients, extracts the function identifier from the URL,
+normalizes the request into the internal format used by the platform, and then
+asks the Commander where the request should be executed. After Commander
+returns the selected runner and instance identifier, the Gateway forwards the
+invocation to that runner and sends the response back to the client.
+
+\begin{figure}[ht]
+	\centering
+	\begin{tikzpicture}[
+			font=\small,
+			>=Latex,
+			participant/.style={
+					draw,
+					rounded corners,
+					minimum width=2.8cm,
+					minimum height=0.9cm,
+					align=center,
+					fill=gray!10
+				},
+			lifeline/.style={dashed, gray!70},
+			call/.style={->, thick},
+			return/.style={->, thick, dashed}
+		]
+		\node[participant] (client) at (0,0) {Client};
+		\node[participant] (gateway) at (4,0) {Gateway};
+		\node[participant] (commander) at (9,0) {Commander};
+		\node[participant] (runner) at (12,0) {Runner};
+
+		\draw[lifeline] (0,-0.45) -- (0,-6.5);
+		\draw[lifeline] (4,-0.45) -- (4,-6.5);
+		\draw[lifeline] (9,-0.45) -- (9,-6.5);
+		\draw[lifeline] (12,-0.45) -- (12,-6.5);
+
+		\draw[call] (0,-1.5) -- node[above,align=center]{HTTP request\\\texttt{/\{functionId\}/...}} (4,-1.5);
+		\draw[call] (4,-2.3) -- node[above]{\texttt{RouteFunction(functionId)}} (9,-2.3);
+		\draw[return] (9,-3.4) -- node[above]{runner address, instance ID} (4,-3.4);
+		\draw[call] (4,-4.5) -- node[above]{\texttt{InvokeFunctionInstance(instanceId, request)}} (12,-4.5);
+		\draw[return] (12,-5.6) -- node[above]{HTTP response} (4,-5.6);
+		\draw[return] (4,-6.2) -- node[above]{HTTP response} (0,-6.2);
+	\end{tikzpicture}
+	\caption{High-level request flow through the API Gateway}
+\end{figure}
 
 
 \end{document}
