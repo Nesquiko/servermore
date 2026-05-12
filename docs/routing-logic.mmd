@@ -1,0 +1,30 @@
+flowchart TD
+    Start([Route request for function id]) --> ReadInstances[Read instances for function from cache]
+    ReadInstances --> InstancesEmpty{Instances length?}
+    
+    InstancesEmpty -->|Zero| ReadRunnerState[Read requests per runner from cache]
+    InstancesEmpty -->|More than zero| FindHealthy[Find first not overloaded instance]
+    
+    FindHealthy --> HealthyFound{Healthy instance found?}
+     HealthyFound -->|No| ReadRunnerState
+    HealthyFound -->|Yes| ReturnExisting[Return instance id and runner address]
+   
+    
+    ReadRunnerState --> PickLeastLoaded[Pick least loaded runner]
+    PickLeastLoaded --> RunnerAvailable{Runner available?}
+    
+    RunnerAvailable -->|No| ReturnNoRunner[Error, no runner available]
+    RunnerAvailable -->|Yes| PrepareInstance[Command chosen runner to prepare instance]
+    
+    PrepareInstance --> WaitPrepare[Wait for instance preparation]
+    WaitPrepare --> ReturnNew[Return new instance id and runner address]
+    
+    ReturnExisting --> End([End])
+    ReturnNoRunner --> End
+    ReturnNew --> End
+    
+    style Start fill:#90EE90
+    style End fill:#FFB6C1
+    style ReturnExisting fill:#87CEEB
+    style ReturnNoRunner fill:#FFA07A
+    style ReturnNew fill:#87CEEB

@@ -2,3 +2,4 @@
 **/*.gen*
 **/*.pb*
 /docs/latex-builds
+/docs/_minted-doc

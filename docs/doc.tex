@@ -4,11 +4,21 @@
 \usepackage[english]{babel}
 \usepackage[margin=1in]{geometry}
 \usepackage{titlesec}
+\usepackage{xcolor}
 \usepackage{hyperref}
 \usepackage{enumitem}
+\usepackage{graphicx}
+\usepackage[outputdir=latex-builds]{minted}
 \usepackage{tikz}
 
-\usetikzlibrary{arrows.meta}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!60!black,
+    urlcolor=teal!70!black,
+    citecolor=purple!60!black
+}
+
+\usetikzlibrary{arrows.meta,shapes.geometric}
 
 \title{\textbf{Servermore: Serverless platform}}
 \author{Bc. Vojtech Babinský, Bc. Lukáš Častven, Bc. Matúš Koleják, Bc. Andrej Streicher}
@@ -43,9 +53,34 @@ Architecture is split into multiple components:
 	      the request, process it, and return a response.
 \end{enumerate}
 
-\subsection{API Gateway}
+\section{Tech stack}
 
-The API Gateway is the public HTTP entrypoint of the system. It receives
+The platform is built with the following technologies:
+
+\begin{itemize}[leftmargin=*]
+	\item \textbf{Golang}: used as the programming language \href{https://go.dev/}{go.dev}.
+	\item \textbf{HTTP}: used for public ingress.
+	      \begin{itemize}[leftmargin=*]
+		      \item The Gateway accepts client requests over HTTP.
+		      \item The Commander function binaries API is also HTTP-based. It is defined with \href{https://www.openapis.org/}{OpenAPI} and generated with \href{https://github.com/oapi-codegen/oapi-codegen}{oapi-codegen}.
+	      \end{itemize}
+	\item \textbf{gRPC}: used for inner system communication \href{https://grpc.io/}{grpc.io}.
+	\item \textbf{SQLite}: used by Commander for storing data \href{https://sqlite.org/}{sqlite.org}. We chose it because we did not need to complicate the stack more and SQLite is enough for now; because the SQLite implementation is behind an interface, we could swap it for PostgreSQL easily.
+	      \begin{itemize}[leftmargin=*]
+		      \item Query code is generated with \href{https://sqlc.dev/}{sqlc} to keep database access type-safe.
+	      \end{itemize}
+	\item \textbf{Structured logging}: implemented with Go's \href{https://go.dev/blog/slog}{slog}.
+	\item \textbf{Instrumentation}: based on \href{https://opentelemetry.io/docs/languages/go/}{OTEL}.
+	      \begin{itemize}[leftmargin=*]
+		      \item HTTP server instrumentation uses \href{https://github.com/riandyrn/otelchi}{otelchi}.
+		      \item gRPC instrumentation uses \href{https://pkg.go.dev/go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc}{otelgrpc}.
+	      \end{itemize}
+	\item \textbf{Visualization}: provided by the \href{https://grafana.com/}{Grafana} stack.
+\end{itemize}
+
+\section{API Gateway}
+
+The API Gateway is the stateless public HTTP entrypoint of the system. It receives
 requests from clients, extracts the function identifier from the URL,
 normalizes the request into the internal format used by the platform, and then
 asks the Commander where the request should be executed. After Commander
@@ -88,6 +123,51 @@ invocation to that runner and sends the response back to the client.
 	\end{tikzpicture}
 	\caption{High-level request flow through the API Gateway}
 \end{figure}
+\pagebreak
+
+\section{Commander}
+
+The Commander is the control plane of the platform. It keeps track of the
+current system state and decides where each request should be executed.
+Conceptually, it acts as the brain of the system: it knows which runners are
+available, which function instances are already running, and whether a request
+should reuse an existing warm instance or trigger a cold start.
+
+To maintain this knowledge, the Commander periodically polls runners for
+heartbeats. Those heartbeats report runner availability, queue depths, and
+resource usage, so the Commander can avoid overloaded or unavailable runners
+when making routing decisions.
+
+The Commander also exposes an HTTP API for uploading and downloading function
+binaries. Uploaded functions are stored and later served to runners when a new
+instance needs to be started and the runner doesn't have the function copy locally.
+
+For request routing, the Commander exposes a gRPC API used by the Gateway. The
+Gateway calls this API for each incoming request to ask for the routing
+decision, and the Commander returns the selected runner address together with
+the instance identifier that should handle the invocation. Figure~\ref{fig:commander-routing}
+shows the routing flow.
+
+\clearpage
+\begin{figure}[p]
+	\centering
+	\includegraphics[height=0.92\textheight]{routing-logic.png}
+	\caption{Routing logic flow}
+	\label{fig:commander-routing}
+\end{figure}
+\clearpage
+
+Commander persists its state in SQLite, which stores the function
+catalog and the registered runners:
+
+\inputminted[fontsize=\small,breaklines]{sql}{../pkg/commander/migrations/20260314155607_init.up.sql}
+
+At runtime, Commander also keeps an in-memory routing cache with the data used
+to answer routing decisions quickly. The implementation only now supports a in-memory
+one, but can easily be replaced by some other cache like Valkey. The new implementation
+would just need to adhere to this interface:
+
+\inputminted[fontsize=\scriptsize,breaklines,firstline=5,lastline=34]{go}{../pkg/caching/cache.go}
 
 
 \end{document}
