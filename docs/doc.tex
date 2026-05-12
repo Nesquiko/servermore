@@ -193,5 +193,15 @@ difficult: a Docker runtime could copy the binary into a container and expose
 the gRPC port, while a JavaScript runtime could do the same with raw JS source
 and a container that provides a JS engine.
 
+\section{Guest}
+
+Guests are the user functions themselves. At the moment we provide only a Go
+SDK, which wraps the function and starts the gRPC server expected by the
+runtime. For other languages, SDKs for them would be similar, because gRPC implementations
+exists for many languages.
+
+The only requirement from the runtime is that it provides the environment
+variables needed to configure the guest server, such as the address it should
+bind to.
 
 \end{document}
