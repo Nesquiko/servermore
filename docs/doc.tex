@@ -169,5 +169,29 @@ would just need to adhere to this interface:
 
 \inputminted[fontsize=\scriptsize,breaklines,firstline=5,lastline=34]{go}{../pkg/caching/cache.go}
 
+\section{Runner}
+
+The Runner is the most complex part of the platform. It has to coordinate
+parallel instance startup, shutdown, binary downloads, and request execution at
+the same time, while still merging concurrent requests for the same function
+into one starting instance instead of spawning duplicate processes.
+
+The coordination model is the main challenge. The runner keeps track of
+instances that are already running, instances that are still starting, and
+downloads that are already in flight. When several requests arrive at once,
+they all wait on the same startup or download result, which lets them collapse
+into one shared preparation path. Once an instance is running, requests are
+serialized through its queue, and idle instances are stopped after the
+configured timeout.
+
+The runner launches each function inside a runtime and communicates with it
+through the guest's gRPC server. Right now only the native runtime is
+implemented, where the binary is started directly on the host, a free port is
+assigned, and the guest is expected to serve gRPC on that port. The
+abstraction is intentionally small, so adding another runtime would not be
+difficult: a Docker runtime could copy the binary into a container and expose
+the gRPC port, while a JavaScript runtime could do the same with raw JS source
+and a container that provides a JS engine.
+
 
 \end{document}
