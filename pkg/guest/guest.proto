@@ -21,5 +21,6 @@ message HeartbeatResponse {}
 
 service Guest {
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse) {}
+
   rpc InvokeFunction(InvocationRequest) returns (InvocationResponse) {}
 }

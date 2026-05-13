@@ -37,7 +37,7 @@ then teardown the instance. Thus removing the need of a permanently running serv
 
 \section{Architecture}
 
-Architecture is split into multiple components:
+Architecture is split into multiple components, and is visualized in Figure~\ref{fig:architecture}:
 
 \begin{enumerate}
 	\item \textbf{API Gateway:} Service, which accepts incoming requests,
@@ -52,6 +52,13 @@ Architecture is split into multiple components:
 	\item \textbf{Guest:} The user's submitted functions. They take in
 	      the request, process it, and return a response.
 \end{enumerate}
+
+\begin{figure}[ht]
+	\centering
+	\includegraphics[width=\textwidth]{architecture.png}
+	\caption{Architecture of the platform}
+	\label{fig:architecture}
+\end{figure}
 
 The whole request path is shown in Figure~\ref{fig:request-flow}. A client
 sends an HTTP request to the Gateway, which strips the function identifier from
@@ -69,6 +76,7 @@ gRPC and returns the response back to the client.
 	\label{fig:request-flow}
 \end{figure}
 
+\pagebreak
 \section{Tech stack}
 
 The platform is built with the following technologies:
@@ -101,9 +109,10 @@ The platform is built with the following technologies:
 The API Gateway is the stateless public HTTP entrypoint of the system. It receives
 requests from clients, extracts the function identifier from the URL,
 normalizes the request into the internal format used by the platform, and then
-asks the Commander where the request should be executed. After Commander
-returns the selected runner and instance identifier, the Gateway forwards the
-invocation to that runner and sends the response back to the client.
+through gRPC asks the Commander to which runner the request should be routed to.
+After Commander returns the selected runner and instance identifier, the
+Gateway forwards the invocation to that runner's gRPC API and sends the response back to
+the client. Simplified sequence flow of this can be seen in Figure~\ref{fig:request-flow}.
 
 \begin{figure}[ht]
 	\centering
@@ -141,6 +150,7 @@ invocation to that runner and sends the response back to the client.
 	\end{tikzpicture}
 	\caption{High-level request flow through the API Gateway}
 \end{figure}
+\pagebreak
 
 \section{Commander}
 
@@ -158,12 +168,14 @@ when making routing decisions.
 The Commander also exposes an HTTP API for uploading and downloading function
 binaries. Uploaded functions are stored and later served to runners when a new
 instance needs to be started and the runner doesn't have the function copy locally.
+More in subsection~\ref{subsec:functions-management}.
 
-For request routing, the Commander exposes a gRPC API used by the Gateway. The
-Gateway calls this API for each incoming request to ask for the routing
-decision, and the Commander returns the selected runner address together with
-the instance identifier that should handle the invocation. Figure~\ref{fig:commander-routing}
-shows the routing flow.
+Commander exposes a gRPC API used for registering new runners and for evaluating
+where to route requests. The definition file is in \texttt{pkg/commander/grpc/commander.proto}.
+
+\inputminted[fontsize=\small,breaklines,firstline=27,lastline=33]{proto}{../pkg/commander/grpc/commander.proto}
+
+The implemented routing logic is depicted in Figure~\ref{fig:commander-routing}.
 
 \clearpage
 \begin{figure}[p]
@@ -175,7 +187,7 @@ shows the routing flow.
 \clearpage
 
 Commander persists its state in SQLite, which stores the function
-catalog and the registered runners:
+catalog and the registered runners, the database schema is very simple:
 
 \inputminted[fontsize=\small,breaklines]{sql}{../pkg/commander/migrations/20260314155607_init.up.sql}
 
@@ -186,13 +198,13 @@ would just need to adhere to this interface:
 
 \inputminted[fontsize=\scriptsize,breaklines,firstline=5,lastline=34]{go}{../pkg/caching/cache.go}
 
-\subsection{Functions management}
+\subsection{Functions management}\label{subsec:functions-management}
 
 The Commander also exposes an HTTP API for function management. It is used to
 deploy a function binary: the user uploads the binary to Commander, Commander
 saves it on file system storage, persists the function name, function ID, and
 storage path to the database, and then returns the function ID back to the
-user.
+user (Figure~\ref{fig:functions-management})
 
 \begin{figure}[ht]
 	\centering
@@ -232,26 +244,75 @@ parallel instance startup, shutdown, binary downloads, and request execution at
 the same time, while still merging concurrent requests for the same function
 into one starting instance instead of spawning duplicate processes.
 
+This component exposes a gRPC API which provides heartbeat data needed for routing
+logic, procedure for preparing instance of a function, and then procedure
+for invoking a request inside an instance.
+The definition file is in \texttt{pkg/runner/grpc/runner.proto}.
+
+\inputminted[fontsize=\scriptsize,breaklines,firstline=39,lastline=45]{proto}{../pkg/runner/grpc/runner.proto}
+
 The coordination model is the main challenge. The runner keeps track of
 instances that are already running, instances that are still starting, and
 downloads that are already in flight. When several requests arrive at once,
 they all wait on the same startup or download result, which lets them collapse
-into one shared preparation path. Once an instance is running, requests are
-put and processed through its queue, and idle instances are stopped after the
-configured timeout.
+into one shared preparation path. This can be better seen in the Figure~\ref{fig:function-scaling},
+in which first (the bottom 2 ones) requests take 1.1 second because they are waiting
+for the instance to start, and then subsequent requests are executed in 2-3 milliseconds.
 
-The runner launches each function inside a runtime and communicates with it
-through the guest's gRPC server. Right now only the native runtime is
+\begin{figure}[ht]
+	\centering
+	\includegraphics[width=\textwidth]{function-scaling.png}
+	\caption{Warm instance reuse keeps subsequent requests in the millisecond range}
+	\label{fig:function-scaling}
+\end{figure}
+
+Once an instance is running, requests are put and processed through its queue,
+and idle instances are stopped after the configured timeout. Figure~\ref{fig:scaling-instances}
+shows how count of active instances of the same function is increased throughout all
+the runners (in the test setup there were 3 runners, they are represented by the
+different colors in the graph) and then when there is no traffic, the instances
+are scaled down to zero.
+
+\begin{figure}[ht]
+	\centering
+	\includegraphics[width=\textwidth]{scaling-instances.png}
+	\caption{Active instances increase with load and drop to zero when idle}
+	\label{fig:scaling-instances}
+\end{figure}
+
+\subsection{Instance runtime}
+
+When runner is asked to prepare an instance for a function, it does:
+
+\begin{enumerate}
+	\item Checks if a function binary is stored in its local storage.
+	      \begin{enumerate}
+		      \item If not, downloads it from the Commander's HTTP API.
+	      \end{enumerate}
+	\item Launches the binary in a runtime.
+	\item Calls the guest's gRPC heartbeat procedure (more about this in
+	      Section~\ref{sec:guest}) until a successful response is returned.
+	      This shows how the runner polls the starting instance until it is up
+	      and ready to process requests.
+	\item Returns the id of this newly started one.
+\end{enumerate}
+
+Right now only the native runtime is
 implemented, where the binary is started directly on the host, a free port is
 assigned, and the guest is expected to serve gRPC on that port. The
-abstraction is intentionally small, so adding another runtime would not be
+guest API is on gRPC network layer, so adding another runtime would not be
 difficult: a Docker runtime could copy the binary into a container and expose
-the gRPC port, while a JavaScript runtime could do the same with raw JS source
+the gRPC port, or a JavaScript runtime could do the same with raw JS source
 and a container that provides a JS engine.
 
-\section{Guest}
+\section{Guest}\label{sec:guest}
 
-Guests are the user functions themselves. At the moment we provide only a Go
+Guests are the user functions themselves. Runner monitors and passes requests
+through the guest's gRPC API. The definition file of this server in \texttt{pkg/guest/guest.proto}.
+
+\inputminted[fontsize=\scriptsize,breaklines,firstline=22,lastline=26]{proto}{../pkg/guest/guest.proto}
+
+At the moment we provide only a Go
 SDK, which wraps the function and starts the gRPC server expected by the
 runtime. For other languages, SDKs for them would be similar, because gRPC implementations
 exists for many languages.
@@ -261,21 +322,23 @@ variables needed to configure the guest server, such as the address it should
 bind to.
 
 \subsection{Constraints}
-Since a guest communicates with the runner over gRPC, it has to contain a gRPC server. This means that user's functions must be written in a language that supports gRPC with suitable libraries (they can cause the overall binary to be bigger).
 
-In order to support other languages, servermore would need to provide **SDKs** for those languages, similar to the Go SDK, which is currently used.
+Since a guest communicates with the runner over gRPC, it has to contain a gRPC
+server. This means that user's functions must be written in a language that
+supports gRPC with suitable libraries (they can cause the overall binary to be bigger).
 
+In order to support other languages, servermore would need to provide SDKs
+for those languages, similar to the Go SDK, which is currently used.
 
 \section{Monitoring}
 
 The monitoring stack is built around the Grafana stack.
-In the local test compose stack, the commander, gateway, and runners export OTLP data to
-Alloy over gRPC. Alloy reads the Docker container logs from the same compose
-setup, filters them down to the servermore services, and forwards them to Loki.
-It also receives traces and metrics over OTLP, forwards traces to Tempo, and
-forwards metrics to Mimir. Grafana is provisioned with all three datasources,
-including trace-to-log correlation from Tempo into Loki. Figure~\ref{fig:monitoring-stack}
-displays the whole flow.
+The commander, gateway, and runners export OTLP data to
+Alloy over gRPC. Alloy reads the Docker container logs of those components.
+Then forwards logs to Loki, traces to Tempo, and metrics to Mimir.
+Grafana is provisioned with all three datasources,
+including trace-to-log correlation from Tempo into Loki.
+Figure~\ref{fig:monitoring-stack} displays the monitoring setup.
 
 \begin{figure}[ht]
 	\centering
@@ -285,8 +348,24 @@ displays the whole flow.
 \end{figure}
 \pagebreak
 
-An example of how this monitoring is visualized in the following trace
-screenshot~\ref{fig:grafana-trace}. It shows a single request flowing through the Gateway,
+\subsection{Instrumentation setup}
+
+Tracing is implemented as middleware around the HTTP and gRPC stacks. The trace
+starts before the request logic runs and finishes after it returns, so the full
+request path is captured around the business code.
+
+Metrics are collected inside the request processing logic itself. That makes
+them describe the actual work done during the request instead of only wrapping
+the handler boundary.
+
+The instrumentation uses \texttt{otelchi} for HTTP middleware,
+\texttt{otelgrpc} for gRPC middleware, and the OpenTelemetry Go SDK packages
+for traces, metrics, exporters, and resource setup.
+
+\subsection{Example}
+
+An example of tracing a request is visualized in the following
+Figure~\ref{fig:grafana-trace}. It shows a single request flowing through the Gateway,
 Commander, Runner, and Guest. Because the same trace context is propagated
 through the HTTP and gRPC hops, the full request stays in one trace and the logs
 can be linked back to the same span tree.
@@ -298,20 +377,6 @@ can be linked back to the same span tree.
 	\label{fig:grafana-trace}
 \end{figure}
 
-And with this visualization we can see some hints of the serverless scaling.
-The screenshot~\ref{fig:function-scaling} shows why warm reuse matters. The first request pays the
-cold-start cost, the second still waits for that cold start to finish, and the
-following requests complete in milliseconds because they reuse the already warm
-instance.
-
-\begin{figure}[ht]
-	\centering
-	\includegraphics[width=\textwidth]{function-scaling.png}
-	\caption{Warm instance reuse keeps subsequent requests in the millisecond range}
-	\label{fig:function-scaling}
-\end{figure}
-
-\clearpage
 \section{Setup}
 
 To run Servermore locally, Docker must already be installed and usable without
@@ -321,7 +386,7 @@ That installs the project toolchain and generators declared in
 \texttt{mise.toml}, including Go, \texttt{sqlc}, \texttt{oapi-codegen}, and
 \texttt{protoc}.
 
-\subsection{Local test}
+\subsection{Scalability testing scenario}
 
 Running \texttt{mise local-test} opens the tester TUI. It first compiles the
 example functions and then starts
@@ -331,7 +396,17 @@ service images. Once the stack is ready, the TUI can deploy a function, and
 after deployment it starts sending requests to that function automatically.
 When the TUI quits, it brings the stack down and removes the Compose volumes.
 
-The request settings are:
+Figure~\ref{fig:deploy} shows how the Docker Compose stack is deployed and
+connected for the scalability test.
+
+\begin{figure}[ht]
+	\centering
+	\includegraphics[width=\textwidth]{deploy.png}
+	\caption{Docker Compose stack used for the scalability test}
+	\label{fig:deploy}
+\end{figure}
+
+The TUI request settings are:
 
 \begin{itemize}[leftmargin=*]
 	\item \textbf{Batch size}: how many requests the TUI sends in one burst before it pauses.
@@ -345,9 +420,12 @@ Use \texttt{0} to enable or disable request sending, \texttt{up/down} or
 link and can start Dozzle on demand for quick container log browsing
 (\href{https://dozzle.dev/}{dozzle.dev}).
 
+The purpose of the test is to deploy a function and generate traffic so the
+scaling behavior is visible.
+
 \subsubsection{Grafana}
 
-Open Grafana and use \texttt{Explore}. Loki shows logs, Tempo shows traces, and
+To explore the test yourself open Grafana and use \texttt{Explore}. Loki shows logs, Tempo shows traces, and
 Mimir provides metrics through the Prometheus datasource. The trace view shows
 the full request path through the gateway, commander, runner, and guest. Logs
 and traces are not real-time, expect roughly a minute before they appear in
@@ -368,5 +446,20 @@ setup makes this easy to reproduce and inspect end to end.
 Future work could focus on better scheduling, stronger isolation for guest
 execution, persistent state outside SQLite, and support for more runtimes and
 languages.
+
+\subsection*{Work split}
+
+\begin{center}
+	\begin{tabular}{|l|l|}
+		\hline
+		Author  & Work split                         \\
+		\hline
+		Andrej  & Commander cache, Runner monitoring \\
+		Lukas   & Architect, Runner, Guest SDK, docs \\
+		Mat\"us & Routing, tests, docs               \\
+		Vojto   & Gateway, monitoring                \\
+		\hline
+	\end{tabular}
+\end{center}
 
 \end{document}

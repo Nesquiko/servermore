@@ -7,8 +7,6 @@ option go_package = "github.com/Nesquiko/servermore/pkg/commander/grpc";
 message HeartbeatRequest {}
 message HeartbeatResponse {}
 
-message RunnerPingResponse {}
-
 message RegisterRunnerRequest {
   string addr = 1;
 }
