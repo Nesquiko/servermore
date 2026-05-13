@@ -221,6 +221,12 @@ The only requirement from the runtime is that it provides the environment
 variables needed to configure the guest server, such as the address it should
 bind to.
 
+\subsection{Constraints}
+Since a guest communicates with the runner over gRPC, it has to contain a gRPC server. This means that user's functions must be written in a language that supports gRPC with suitable libraries (they can cause the overall binary to be bigger).
+
+In order to support other languages, servermore would need to provide **SDKs** for those languages, similar to the Go SDK, which is currently used.
+
+
 \section{Monitoring}
 
 The monitoring stack is built around the Grafana stack.
