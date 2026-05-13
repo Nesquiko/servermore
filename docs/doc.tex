@@ -186,6 +186,45 @@ would just need to adhere to this interface:
 
 \inputminted[fontsize=\scriptsize,breaklines,firstline=5,lastline=34]{go}{../pkg/caching/cache.go}
 
+\subsection{Functions management}
+
+The Commander also exposes an HTTP API for function management. It is used to
+deploy a function binary: the user uploads the binary to Commander, Commander
+saves it on file system storage, persists the function name, function ID, and
+storage path to the database, and then returns the function ID back to the
+user.
+
+\begin{figure}[ht]
+	\centering
+	\begin{tikzpicture}[
+			font=\small,
+			>=Latex,
+			participant/.style={draw, rounded corners, minimum width=3cm, minimum height=0.9cm, align=center, fill=gray!10},
+			lifeline/.style={dashed, gray!70},
+			call/.style={->, thick},
+			return/.style={->, thick, dashed}
+		]
+		\node[participant] (user) at (0,0) {User};
+		\node[participant] (commander) at (4.5,0) {Commander};
+		\node[participant] (fs) at (9,0) {File system};
+		\node[participant] (db) at (13.5,0) {Database};
+
+		\draw[lifeline] (0,-0.45) -- (0,-6.2);
+		\draw[lifeline] (4.5,-0.45) -- (4.5,-6.2);
+		\draw[lifeline] (9,-0.45) -- (9,-6.2);
+		\draw[lifeline] (13.5,-0.45) -- (13.5,-6.2);
+
+		\draw[call] (0,-1.3) -- node[above,align=center]{HTTP upload function binary} (4.5,-1.3);
+		\draw[call] (4.5,-2.2) -- node[above]{save binary} (9,-2.2);
+		\draw[return] (9,-3.1) -- node[above]{storage path} (4.5,-3.1);
+		\draw[call] (4.5,-4.5) -- node[above,align=center]{persist function name,\\function ID, storage path} (13.5,-4.5);
+		\draw[return] (13.5,-5.0) -- node[above]{stored} (4.5,-5.0);
+		\draw[return] (4.5,-5.8) -- node[above]{function ID} (0,-5.8);
+	\end{tikzpicture}
+	\caption{Function deployment flow in Commander}
+	\label{fig:functions-management}
+\end{figure}
+
 \section{Runner}
 
 The Runner is the most complex part of the platform. It has to coordinate
